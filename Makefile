@@ -25,8 +25,8 @@ COMPOSE        := docker compose
 COMPOSE_FILE   := -f docker-compose.yml
 COMPOSE_DEV    := -f docker-compose.yml -f docker-compose.dev.yml
 SCRIPTS_DIR    := scripts
-MODEL_REPO     ?= bartowski/google_gemma-4-e4b-it-GGUF
-MODEL_FILE     ?= gemma-4-e4b-it-Q4_K_M.gguf
+MODEL_REPO     ?= unsloth/gemma-4-E4B-it-GGUF
+MODEL_FILE     ?= gemma-4-E4B-it-Q4_K_M.gguf
 
 # ── 顏色 ─────────────────────────────────────────────────────────────
 BLUE   := \033[0;34m

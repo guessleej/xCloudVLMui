@@ -20,8 +20,6 @@
 
 name: xcloudvlmui-platform
 
-version: "3.9"
-
 # ── 共用環境變數 ─────────────────────────────────────────────────────
 x-llm-env: &llm-env
   LLM_BASE_URL:    http://llama-cpp:8080
@@ -52,32 +50,22 @@ services:
       - model-data:/models
     environment:
       - HF_TOKEN=${HF_TOKEN:-}
-      - MODEL_REPO=${MODEL_REPO:-bartowski/google_gemma-4-e4b-it-GGUF}
-      - MODEL_FILE=${MODEL_FILE:-gemma-4-e4b-it-Q4_K_M.gguf}
+      - MODEL_REPO=${MODEL_REPO:-unsloth/gemma-4-E4B-it-GGUF}
+      - MODEL_FILE=${MODEL_FILE:-gemma-4-E4B-it-Q4_K_M.gguf}
       - HF_HUB_DISABLE_PROGRESS_BARS=0
     command: >
-      /bin/bash -c "
-        MODEL=/models/$${MODEL_FILE} ;
-        if [ -f \"$$MODEL\" ]; then
-          echo '✓ 模型已存在，跳過下載。' ;
-          ls -lh $$MODEL ;
-          exit 0 ;
-        fi ;
-        echo '正在安裝 huggingface_hub...' ;
-        pip install -q huggingface_hub ;
-        echo '開始下載 Gemma 4 E4B GGUF Q4_K_M (~4GB)...' ;
-        python3 -c "
-          from huggingface_hub import hf_hub_download ;
-          import os ;
-          token = os.environ.get('HF_TOKEN') or None ;
-          repo  = os.environ.get('MODEL_REPO', 'bartowski/google_gemma-4-e4b-it-GGUF') ;
-          fname = os.environ.get('MODEL_FILE', 'gemma-4-e4b-it-Q4_K_M.gguf') ;
-          print(f'下載 {repo}/{fname}') ;
-          path  = hf_hub_download(repo_id=repo, filename=fname, token=token, local_dir='/models', local_dir_use_symlinks=False) ;
-          print(f'完成: {path}') ;
-          import subprocess ; subprocess.run(['ls','-lh','/models'])
-        " ;
-      "
+      /bin/bash -c '
+        MODEL=/models/$${MODEL_FILE};
+        if [ -f "$$MODEL" ]; then
+          echo "✓ 模型已存在: $$MODEL";
+          ls -lh "$$MODEL";
+          exit 0;
+        else
+          echo "❌ 模型不存在: $$MODEL";
+          echo "請先執行 make setup 下載模型";
+          exit 1;
+        fi
+      '
     restart: "no"
     logging: *default-logging
 
@@ -120,26 +108,26 @@ services:
       - model-data:/models:ro
     # Gemma 4 E4B: 128K context, Q4_K_M ~4GB VRAM
     # AIR-030 64GB 剩餘記憶體全做 KV Cache
-    command: >
-      /bin/bash -c "
-        echo 'Waiting for model...' ;
-        until [ -f /models/$${MODEL_FILE:-gemma-4-e4b-it-Q4_K_M.gguf} ]; do
-          sleep 5 ;
-        done ;
-        echo 'Starting llama-server...' ;
-        llama-server
-          --model /models/gemma-4-e4b-it-Q4_K_M.gguf
-          --host 0.0.0.0
-          --port 8080
-          --n-gpu-layers 999
-          --ctx-size 131072
-          --threads 8
-          --batch-size 512
-          --ubatch-size 512
-          --embedding
+    command:
+      - /bin/bash
+      - -c
+      - |
+        echo 'Waiting for model...'
+        until [ -f /models/gemma-4-E4B-it-Q4_K_M.gguf ]; do
+          sleep 5
+        done
+        echo 'Starting llama-server...'
+        exec llama-server \
+          --model /models/gemma-4-E4B-it-Q4_K_M.gguf \
+          --host 0.0.0.0 \
+          --port 8080 \
+          --n-gpu-layers 999 \
+          --ctx-size 131072 \
+          --threads 8 \
+          --batch-size 512 \
+          --ubatch-size 512 \
+          --embedding \
           --alias gemma-4-e4b-it
-          --log-disable
-      "
     ports:
       - "8080:8080"
     depends_on:
@@ -187,8 +175,8 @@ services:
     devices:
       - /dev/video0:/dev/video0    # USB 鏡頭（可選）
     healthcheck:
-      # HTTP GET / → 任何 2xx/3xx 視為健康
-      test: ["CMD", "curl", "-sf", "--max-time", "4", "http://localhost:8090/"]
+      # HTTPS GET / → 任何 2xx/3xx 視為健康（vlm-webui 預設使用自簽 SSL）
+      test: ["CMD", "curl", "-skf", "--max-time", "4", "https://localhost:8090/"]
       interval: 30s
       timeout:  10s
       retries:  5
@@ -259,6 +247,7 @@ services:
       - NEXT_PUBLIC_API_URL=http://backend:8000
       - NEXT_PUBLIC_VLM_WEBUI_URL=http://localhost/vlm
       - NODE_ENV=production
+      - HOSTNAME=0.0.0.0
     env_file:
       - path: ./frontend/.env.local
         required: false
@@ -268,7 +257,7 @@ services:
       backend:
         condition: service_healthy
     healthcheck:
-      test: ["CMD", "curl", "-sf", "http://localhost:3000"]
+      test: ["CMD-SHELL", "wget -qO /dev/null http://0.0.0.0:3000/ || exit 1"]
       interval: 20s
       timeout:  10s
       retries:  5
@@ -291,7 +280,7 @@ services:
       - backend
       - vlm-webui
     healthcheck:
-      test: ["CMD", "wget", "-qO-", "http://localhost/api/health"]
+      test: ["CMD-SHELL", "test -f /var/run/nginx.pid && ps aux | grep -q '[n]ginx'"]
       interval: 30s
       timeout:  5s
       retries:  3
@@ -338,8 +327,12 @@ services:
 
 # ── Named Volumes ────────────────────────────────────────────────────
 volumes:
-  model-data:        # GGUF 模型檔案（由 model-init 下載）
+  model-data:        # GGUF 模型檔案（bind mount 至主機 ./models）
     driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: ${PWD}/models
   backend-data:      # SQLite DB + ChromaDB vector store
     driver: local
   mosquitto-data:    # MQTT Broker 持久化訊息

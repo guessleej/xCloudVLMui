@@ -1,9 +1,7 @@
 <!-- xCloudVLMui — README.md -->
 <div align="center">
 
-# xCloudVLMui
-
-**工廠設備健康管理平台**
+make setup
 
 [![Platform](https://img.shields.io/badge/Platform-Jetson%20AGX%20Orin%2064GB-76b900?logo=nvidia&logoColor=white)](https://www.nvidia.com/en-us/autonomous-machines/embedded-systems/jetson-agx-orin/)
 [![JetPack](https://img.shields.io/badge/JetPack-6.0-76b900?logo=nvidia&logoColor=white)](https://developer.nvidia.com/embedded/jetpack)
