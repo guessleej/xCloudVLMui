@@ -158,3 +158,58 @@ async def test_delete_report_soft_deletes(client):
 async def test_delete_nonexistent_report_returns_404(client):
     resp = await client.delete("/api/reports/nonexistent-id-xyz")
     assert resp.status_code == 404
+
+
+# ── POST /api/reports/capture-vlm-session ───────────────────────────
+
+@pytest.mark.anyio
+async def test_capture_vlm_session_with_raw_json_creates_structured_markdown(client):
+    payload = {
+        "session_id": "vlm-session-001",
+        "source": "vlm-webui",
+        "captured_at": "2026-04-16T09:20:00Z",
+        "raw_vlm_json": {
+            "scene": "diagnosis",
+            "risk_level": "critical",
+            "anomaly_summary": "發現冷卻風扇卡滯與外殼油汙。",
+        },
+        "equipment_id": "EQ-001",
+        "equipment_name": "壓縮機 #1",
+        "operator_note": "夜班巡檢，鏡頭偏左 10 度。",
+    }
+
+    resp = await client.post("/api/reports/capture-vlm-session", json=payload)
+    assert resp.status_code == 201
+    data = resp.json()
+    assert data["risk_level"] == "critical"
+    assert data["equipment_id"] == "EQ-001"
+    assert "會話資訊" in (data["markdown_content"] or "")
+    assert "操作員備註" in (data["markdown_content"] or "")
+
+
+@pytest.mark.anyio
+async def test_capture_vlm_session_without_raw_json_marks_incomplete(client):
+    payload = {
+        "session_id": "vlm-session-002",
+        "source": "vlm-webui",
+        "captured_at": "2026-04-16T09:25:00Z",
+        "operator_note": "先建檔，稍後補 JSON。",
+    }
+
+    resp = await client.post("/api/reports/capture-vlm-session", json=payload)
+    assert resp.status_code == 201
+    data = resp.json()
+    assert data["risk_level"] == "moderate"
+    markdown = data.get("markdown_content") or ""
+    assert "資料不完整" in markdown
+    assert "vlm-session-002" in markdown
+
+
+@pytest.mark.anyio
+async def test_capture_vlm_session_malformed_payload_returns_422(client):
+    payload = {
+        "source": "vlm-webui",
+        "captured_at": "2026-04-16T09:30:00Z",
+    }
+    resp = await client.post("/api/reports/capture-vlm-session", json=payload)
+    assert resp.status_code == 422

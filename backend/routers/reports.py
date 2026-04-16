@@ -82,11 +82,34 @@ async def capture_vlm_session(
     VLM WebUI 巡檢結束後前端觸發。
     自動以 raw_vlm_json 產生 MD 報告並儲存至資料庫。
     """
+    metadata = {
+        "session_id": payload.session_id,
+        "captured_at": payload.captured_at,
+        "source": payload.source,
+    }
+    if payload.equipment_id:
+        metadata["equipment_id"] = payload.equipment_id
+    if payload.equipment_name:
+        metadata["equipment_name"] = payload.equipment_name
+    if payload.operator_note:
+        metadata["operator_note"] = payload.operator_note
+
+    raw_payload: dict | None = None
+    markdown_content: str | None = None
+    if payload.raw_vlm_json:
+        raw_payload = {**payload.raw_vlm_json, "_capture_metadata": metadata}
+    else:
+        raw_payload = {"_capture_metadata": metadata, "_capture_status": "incomplete"}
+        markdown_content = _incomplete_capture_markdown(metadata)
+
     data = ReportCreate(
         title=          f"VLM 巡檢報告 — {payload.captured_at[:16]}",
+        equipment_id=   payload.equipment_id,
+        equipment_name= payload.equipment_name,
         risk_level=     _infer_risk(payload.raw_vlm_json),
         source=         payload.source,
-        raw_vlm_json=   payload.raw_vlm_json,
+        raw_vlm_json=   raw_payload,
+        markdown_content=markdown_content,
     )
     report = await create_report(db, data)
     return report_to_out(report)
@@ -100,3 +123,25 @@ def _infer_risk(vlm_json: dict | None) -> str:
         or vlm_json.get("overall_risk_level")
         or "moderate"
     )
+
+
+def _incomplete_capture_markdown(metadata: dict[str, str]) -> str:
+    lines = [
+        "# VLM 巡檢報告（資料不完整）",
+        "",
+        "此報告由半自動回寫建立，尚未附上 `raw_vlm_json`，請補登原始巡檢 JSON 以產生完整結構化內容。",
+        "",
+        "## 會話資訊",
+        "",
+        f"- Session ID：`{metadata.get('session_id', 'N/A')}`",
+        f"- Captured At：`{metadata.get('captured_at', 'N/A')}`",
+        f"- Source：`{metadata.get('source', 'vlm-webui')}`",
+    ]
+    if metadata.get("equipment_id"):
+        lines.append(f"- Equipment ID：`{metadata['equipment_id']}`")
+    if metadata.get("equipment_name"):
+        lines.append(f"- Equipment Name：`{metadata['equipment_name']}`")
+    if metadata.get("operator_note"):
+        lines.extend(["", "## 操作員備註", "", metadata["operator_note"]])
+
+    return "\n".join(lines)

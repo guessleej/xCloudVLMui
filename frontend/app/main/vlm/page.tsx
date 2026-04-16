@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Camera,
   CheckCircle2,
@@ -14,13 +14,12 @@ import {
   Save,
   Search,
   ShieldCheck,
-  Video,
   X,
   Zap,
 } from "lucide-react";
 import toast from "react-hot-toast";
-import { reportsApi, vlmApi, ragApi } from "@/lib/api";
-import type { RagSource } from "@/types";
+import { dashboardApi, reportsApi, vlmApi, ragApi } from "@/lib/api";
+import type { Equipment, RagSource } from "@/types";
 
 const INSPECTION_SCENARIOS = [
   { title: "外觀與管線異常掃描", detail: "漏油、漏水、鬆脫、外殼變形與異常磨耗。" },
@@ -42,6 +41,9 @@ type VlmStatus = {
   llm_url: string;
   model?: string | null;
 };
+
+type SessionState = "idle" | "active" | "ended";
+type StandaloneState = "opened" | "closed" | "unknown" | "blocked";
 
 /** 可折疊面板 */
 function Collapsible({
@@ -85,13 +87,30 @@ function Collapsible({
   );
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return !!value && typeof value === "object" && !Array.isArray(value);
+}
+
+function readString(value: unknown): string | null {
+  return typeof value === "string" && value.trim() ? value.trim() : null;
+}
+
 export default function VlmPage() {
   const [saving, setSaving] = useState(false);
   const [sessionId, setSessionId] = useState<string | null>(null);
+  const [sessionState, setSessionState] = useState<SessionState>("idle");
+  const [sessionStartedAt, setSessionStartedAt] = useState<string | null>(null);
+  const [sessionEndedAt, setSessionEndedAt] = useState<string | null>(null);
+  const [reportId, setReportId] = useState<string | null>(null);
+
+  const [standaloneState, setStandaloneState] = useState<StandaloneState>("unknown");
+  const [standaloneOpenedAt, setStandaloneOpenedAt] = useState<string | null>(null);
+  const standaloneWindowRef = useRef<Window | null>(null);
+  const standaloneMonitorRef = useRef<number | null>(null);
+
   const [iframeKey, setIframeKey] = useState(0);
   const [status, setStatus] = useState<VlmStatus | null>(null);
   const [statusLoading, setStatusLoading] = useState(false);
-  const iframeRef = useRef<HTMLIFrameElement>(null);
   const [showCompare, setShowCompare] = useState(false);
   const [compareQuery, setCompareQuery] = useState("");
   const [comparing, setComparing] = useState(false);
@@ -100,7 +119,83 @@ export default function VlmPage() {
     sources: RagSource[];
   } | null>(null);
 
+  const [rawJsonInput, setRawJsonInput] = useState("");
+  const [rawJsonParsed, setRawJsonParsed] = useState<Record<string, unknown> | null>(null);
+  const [rawJsonError, setRawJsonError] = useState<string | null>(null);
+  const [operatorNote, setOperatorNote] = useState("");
+
+  const [equipmentLoading, setEquipmentLoading] = useState(false);
+  const [equipments, setEquipments] = useState<Equipment[]>([]);
+  const [selectedEquipmentId, setSelectedEquipmentId] = useState("");
+
   const VLM_URL = process.env.NEXT_PUBLIC_VLM_WEBUI_URL ?? "http://localhost:8090";
+
+  const selectedEquipment = useMemo(
+    () => equipments.find((item) => item.id === selectedEquipmentId) ?? null,
+    [equipments, selectedEquipmentId],
+  );
+
+  const parsedSummary = useMemo(() => {
+    if (!rawJsonParsed) {
+      return null;
+    }
+    const risk = readString(rawJsonParsed.risk_level) ?? readString(rawJsonParsed.overall_risk_level) ?? "moderate";
+    const scene = readString(rawJsonParsed.scene) ?? "diagnosis";
+    const findings = readString(rawJsonParsed.anomaly_summary) ?? readString(rawJsonParsed.findings_summary) ?? "無摘要欄位";
+
+    const actionNode = rawJsonParsed.recommended_actions ?? rawJsonParsed.work_items;
+    const actionCount = Array.isArray(actionNode) ? actionNode.length : 0;
+
+    return { risk, scene, findings, actionCount };
+  }, [rawJsonParsed]);
+
+  const parseRawJson = useCallback((value: string) => {
+    const trimmed = value.trim();
+    if (!trimmed) {
+      setRawJsonParsed(null);
+      setRawJsonError(null);
+      return;
+    }
+    try {
+      const parsed = JSON.parse(trimmed) as unknown;
+      if (!isRecord(parsed)) {
+        setRawJsonParsed(null);
+        setRawJsonError("JSON 需為物件格式（{...}），不能是陣列或純文字。");
+        return;
+      }
+      setRawJsonParsed(parsed);
+      setRawJsonError(null);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "JSON 格式錯誤";
+      setRawJsonParsed(null);
+      setRawJsonError(`無法解析 JSON：${message}`);
+    }
+  }, []);
+
+  const stopStandaloneMonitor = useCallback(() => {
+    if (standaloneMonitorRef.current != null) {
+      window.clearInterval(standaloneMonitorRef.current);
+      standaloneMonitorRef.current = null;
+    }
+  }, []);
+
+  const startStandaloneMonitor = useCallback(() => {
+    stopStandaloneMonitor();
+    standaloneMonitorRef.current = window.setInterval(() => {
+      const popup = standaloneWindowRef.current;
+      if (!popup) {
+        setStandaloneState("unknown");
+        return;
+      }
+      if (popup.closed) {
+        setStandaloneState("closed");
+        standaloneWindowRef.current = null;
+        stopStandaloneMonitor();
+      } else {
+        setStandaloneState("opened");
+      }
+    }, 1000);
+  }, [stopStandaloneMonitor]);
 
   const loadStatus = useCallback(async () => {
     setStatusLoading(true);
@@ -120,11 +215,70 @@ export default function VlmPage() {
     }
   }, [VLM_URL]);
 
-  useEffect(() => { loadStatus(); }, [loadStatus]);
+  const loadEquipments = useCallback(async () => {
+    setEquipmentLoading(true);
+    try {
+      const response = await dashboardApi.getEquipment();
+      setEquipments(response.data ?? []);
+    } catch {
+      setEquipments([]);
+    } finally {
+      setEquipmentLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    loadStatus();
+    loadEquipments();
+  }, [loadStatus, loadEquipments]);
+
+  useEffect(() => () => {
+    stopStandaloneMonitor();
+  }, [stopStandaloneMonitor]);
 
   const handleRefresh = async () => {
     setIframeKey((c) => c + 1);
     await loadStatus();
+  };
+
+  const handleStartSession = () => {
+    const newSessionId = `vlm-${Date.now()}`;
+    const startedAt = new Date().toISOString();
+    setSessionId(newSessionId);
+    setSessionState("active");
+    setSessionStartedAt(startedAt);
+    setSessionEndedAt(null);
+    setReportId(null);
+    toast.success("巡檢會話已建立，可開始外部視窗巡檢。");
+  };
+
+  const handleEndSession = () => {
+    if (sessionState !== "active") {
+      toast("目前沒有進行中的會話。");
+      return;
+    }
+    setSessionState("ended");
+    setSessionEndedAt(new Date().toISOString());
+    toast.success("巡檢會話已標記為結束，可回寫 JSON 產生報告。");
+  };
+
+  const handleOpenStandalone = () => {
+    if (sessionState === "idle") {
+      handleStartSession();
+    }
+
+    const popup = window.open(VLM_URL, "xcloud-vlm-standalone", "noopener,noreferrer");
+    if (!popup) {
+      setStandaloneState("blocked");
+      toast.error("瀏覽器阻擋了新視窗，請允許彈出視窗後再試。", { duration: 4500 });
+      return;
+    }
+
+    standaloneWindowRef.current = popup;
+    setStandaloneState("opened");
+    setStandaloneOpenedAt(new Date().toISOString());
+    popup.focus();
+    startStandaloneMonitor();
   };
 
   const handleCompare = async () => {
@@ -142,15 +296,44 @@ export default function VlmPage() {
   };
 
   const handleSaveSession = async () => {
+    if (rawJsonError) {
+      toast.error("請先修正 JSON 格式後再儲存報告。");
+      return;
+    }
+
     setSaving(true);
     try {
+      const activeSessionId = sessionId ?? `vlm-${Date.now()}`;
+      const capturedAt = sessionEndedAt ?? new Date().toISOString();
+
+      if (!sessionId) {
+        setSessionId(activeSessionId);
+        setSessionStartedAt(capturedAt);
+      }
+
       const response = await reportsApi.captureVlmSession({
-        session_id: sessionId ?? `vlm-${Date.now()}`,
+        session_id: activeSessionId,
         source: "vlm-webui",
-        captured_at: new Date().toISOString(),
+        captured_at: capturedAt,
+        raw_vlm_json: rawJsonParsed ?? undefined,
+        equipment_id: selectedEquipment?.id,
+        equipment_name: selectedEquipment?.name,
+        operator_note: operatorNote.trim() || undefined,
       });
-      setSessionId(response.data.id ?? response.data.title);
-      toast.success("巡檢記錄已轉為維護報告。");
+
+      if (sessionState !== "ended") {
+        setSessionState("ended");
+      }
+      if (!sessionEndedAt) {
+        setSessionEndedAt(capturedAt);
+      }
+
+      setReportId(response.data.id);
+      if (rawJsonParsed) {
+        toast.success("巡檢記錄與 JSON 已轉為維護報告。");
+      } else {
+        toast.success("巡檢報告已建立（資料不完整，可後續補登 JSON）。");
+      }
     } catch (error: any) {
       toast.error(error?.response?.data?.detail ?? "儲存失敗，請確認後端服務是否運作。");
     } finally {
@@ -158,14 +341,23 @@ export default function VlmPage() {
     }
   };
 
+  const standaloneLabel = {
+    opened: "Opened",
+    closed: "Closed",
+    unknown: "Unknown",
+    blocked: "Blocked",
+  }[standaloneState];
+
+  const standaloneTone = {
+    opened: "status-pill-ok",
+    closed: "status-pill-warn",
+    unknown: "status-pill-warn",
+    blocked: "status-pill-danger",
+  }[standaloneState];
+
   return (
     <div className="space-y-4">
-
-      {/* ══════════════════════════════════════════════════════════
-          1. 現場影像主畫面（最上方、全寬、最大化）
-          ══════════════════════════════════════════════════════════ */}
       <section className="panel-soft rounded-[32px] p-4 sm:p-5">
-        {/* 標題列 + 操作按鈕 */}
         <div className="flex flex-col gap-3 border-b border-white/8 pb-4 sm:flex-row sm:items-center sm:justify-between">
           <div className="flex items-center gap-3">
             <div className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-2xl border border-brand-400/30 bg-brand-500/15">
@@ -175,11 +367,11 @@ export default function VlmPage() {
               <p className="text-[10px] uppercase tracking-[0.24em] text-slate-500">Live Inspection Surface</p>
               <h1 className="mt-0.5 text-xl font-semibold text-white">現場影像與推論畫面</h1>
             </div>
-            {/* 狀態 pills */}
             <div className="ml-2 hidden items-center gap-2 sm:flex">
               <StatusDot ok={status?.webui_ok ?? false} loading={statusLoading} label="WebUI" />
               <StatusDot ok={status?.llm_ok ?? false} loading={statusLoading} label="引擎" />
-              {sessionId && <span className="status-pill status-pill-ok">報告已建立</span>}
+              <span className={`status-pill ${standaloneTone}`}>視窗 {standaloneLabel}</span>
+              {reportId && <span className="status-pill status-pill-ok">報告 {reportId.slice(0, 8)}</span>}
             </div>
           </div>
 
@@ -188,10 +380,16 @@ export default function VlmPage() {
               <RefreshCw className={`h-4 w-4 ${statusLoading ? "animate-spin" : ""}`} />
               重載
             </button>
-            <a href={VLM_URL} target="_blank" rel="noopener noreferrer" className="secondary-button">
+            <button onClick={handleOpenStandalone} className="secondary-button">
               <ExternalLink className="h-4 w-4" />
               獨立視窗
-            </a>
+            </button>
+            <button
+              onClick={sessionState === "active" ? handleEndSession : handleStartSession}
+              className="secondary-button"
+            >
+              {sessionState === "active" ? "結束會話" : "建立會話"}
+            </button>
             <button onClick={handleSaveSession} disabled={saving} className="primary-button">
               <Save className="h-4 w-4" />
               {saving ? "轉換中..." : "儲存為報告"}
@@ -206,14 +404,12 @@ export default function VlmPage() {
           </div>
         </div>
 
-        {/* ── iframe 主畫面（全寬，高度自適應） ── */}
         <div
           className="mt-4 overflow-hidden rounded-[28px] border border-white/8 bg-slate-950/70"
           style={{ height: "clamp(500px, calc(100vh - 280px), 900px)" }}
         >
           <iframe
             key={iframeKey}
-            ref={iframeRef}
             src={VLM_URL}
             className="h-full w-full border-0"
             title="live-vlm-webui"
@@ -222,7 +418,105 @@ export default function VlmPage() {
           />
         </div>
 
-        {/* ── 知識庫比對折疊面板 ── */}
+        <div className="mt-4 grid gap-4 lg:grid-cols-3">
+          <div className="rounded-[20px] border border-white/10 bg-white/[0.04] p-4">
+            <div className="flex items-center justify-between">
+              <p className="text-[10px] uppercase tracking-[0.2em] text-slate-500">Session State</p>
+              <span className={`status-pill ${sessionState === "active" ? "status-pill-ok" : sessionState === "ended" ? "status-pill-warn" : "status-pill-danger"}`}>
+                {sessionState.toUpperCase()}
+              </span>
+            </div>
+            <p className="mt-3 break-all text-sm font-semibold text-white">{sessionId ?? "尚未建立"}</p>
+            <p className="mt-1 text-xs text-slate-400">Start: {sessionStartedAt ? new Date(sessionStartedAt).toLocaleString("zh-TW") : "-"}</p>
+            <p className="mt-1 text-xs text-slate-400">End: {sessionEndedAt ? new Date(sessionEndedAt).toLocaleString("zh-TW") : "-"}</p>
+          </div>
+
+          <div className="rounded-[20px] border border-white/10 bg-white/[0.04] p-4">
+            <div className="flex items-center justify-between">
+              <p className="text-[10px] uppercase tracking-[0.2em] text-slate-500">Standalone Window</p>
+              <span className={`status-pill ${standaloneTone}`}>{standaloneLabel}</span>
+            </div>
+            <p className="mt-3 text-sm font-semibold text-white">{VLM_URL}</p>
+            <p className="mt-1 text-xs text-slate-400">Opened At: {standaloneOpenedAt ? new Date(standaloneOpenedAt).toLocaleString("zh-TW") : "-"}</p>
+          </div>
+
+          <div className="rounded-[20px] border border-white/10 bg-white/[0.04] p-4">
+            <div className="flex items-center justify-between">
+              <p className="text-[10px] uppercase tracking-[0.2em] text-slate-500">Report Bridge</p>
+              <span className={`status-pill ${rawJsonError ? "status-pill-danger" : rawJsonParsed ? "status-pill-ok" : "status-pill-warn"}`}>
+                {rawJsonError ? "Invalid JSON" : rawJsonParsed ? "Ready" : "Waiting"}
+              </span>
+            </div>
+            <p className="mt-3 text-sm font-semibold text-white">{rawJsonParsed ? "已解析 raw_vlm_json" : "尚未貼上 JSON"}</p>
+            <p className="mt-1 text-xs text-slate-400">半自動回寫：貼上 JSON 後送出 /capture-vlm-session</p>
+          </div>
+        </div>
+
+        <div className="mt-4 rounded-[28px] border border-white/10 bg-slate-950/60 p-5">
+          <div className="flex items-center justify-between gap-3 border-b border-white/8 pb-4">
+            <div>
+              <p className="text-[10px] uppercase tracking-[0.24em] text-slate-500">JSON Writeback</p>
+              <h3 className="mt-1 text-base font-semibold text-white">raw_vlm_json 回寫面板</h3>
+            </div>
+            <span className="status-pill status-pill-warn">半自動橋接</span>
+          </div>
+
+          <div className="mt-4 grid gap-4 lg:grid-cols-2">
+            <div className="space-y-3">
+              <label className="text-xs text-slate-400">選擇設備（可選）</label>
+              <select
+                value={selectedEquipmentId}
+                onChange={(e) => setSelectedEquipmentId(e.target.value)}
+                className="w-full rounded-[14px] border border-white/10 bg-slate-950/50 px-3 py-2.5 text-sm text-white outline-none focus:border-brand-500/50"
+              >
+                <option value="">未指定設備</option>
+                {equipments.map((item) => (
+                  <option key={item.id} value={item.id}>
+                    {item.name} ({item.id})
+                  </option>
+                ))}
+              </select>
+              {equipmentLoading && <p className="text-xs text-slate-500">載入設備清單中…</p>}
+
+              <label className="text-xs text-slate-400">操作員備註（可選）</label>
+              <textarea
+                value={operatorNote}
+                onChange={(e) => setOperatorNote(e.target.value)}
+                rows={4}
+                placeholder="例如：本次巡檢於夜班完成，鏡頭角度偏左。"
+                className="w-full rounded-[14px] border border-white/10 bg-slate-950/50 px-3 py-2.5 text-sm text-white outline-none focus:border-brand-500/50"
+              />
+            </div>
+
+            <div className="space-y-2">
+              <label className="text-xs text-slate-400">貼上 raw_vlm_json（可留空，將建立資料不完整報告）</label>
+              <textarea
+                value={rawJsonInput}
+                onChange={(e) => {
+                  const value = e.target.value;
+                  setRawJsonInput(value);
+                  parseRawJson(value);
+                }}
+                rows={10}
+                placeholder='{"risk_level": "moderate", "anomaly_summary": "..."}'
+                className={`w-full rounded-[14px] border px-3 py-2.5 text-sm text-white outline-none ${rawJsonError ? "border-red-400/70 bg-red-950/20" : "border-white/10 bg-slate-950/50 focus:border-brand-500/50"}`}
+              />
+              {rawJsonError
+                ? <p className="text-xs text-red-300">{rawJsonError}</p>
+                : <p className="text-xs text-slate-500">JSON 合法時會自動顯示摘要。</p>}
+            </div>
+          </div>
+
+          {parsedSummary && (
+            <div className="mt-4 grid gap-3 sm:grid-cols-4">
+              <StatusTile label="風險等級" statusLabel="Parsed" value={parsedSummary.risk.toUpperCase()} detail="risk_level / overall_risk_level" tone="status-pill-ok" />
+              <StatusTile label="場景" statusLabel="Parsed" value={parsedSummary.scene} detail="scene" tone="status-pill-ok" />
+              <StatusTile label="異常摘要" statusLabel="Parsed" value={parsedSummary.findings} detail="anomaly_summary / findings_summary" tone="status-pill-ok" />
+              <StatusTile label="建議行動" statusLabel="Parsed" value={`${parsedSummary.actionCount} 筆`} detail="recommended_actions / work_items" tone="status-pill-ok" />
+            </div>
+          )}
+        </div>
+
         {showCompare && (
           <div className="mt-4 rounded-[28px] border border-white/10 bg-slate-950/60 p-5">
             <div className="flex items-center justify-between gap-3 border-b border-white/8 pb-4">
@@ -284,11 +578,7 @@ export default function VlmPage() {
         )}
       </section>
 
-      {/* ══════════════════════════════════════════════════════════
-          2. 次要資訊：可折疊區塊（預設收合）
-          ══════════════════════════════════════════════════════════ */}
       <section className="grid gap-4 lg:grid-cols-3">
-        {/* 系統狀態 */}
         <Collapsible
           kicker="System"
           title="推論引擎狀態"
@@ -299,11 +589,10 @@ export default function VlmPage() {
             <StatusTile label="VLM WebUI" statusLabel={status?.webui_ok ? "Ready" : "Offline"} value={status?.webui_ok ? "Online" : "Offline"} detail={status?.webui_url ?? VLM_URL} tone={status?.webui_ok ? "status-pill-ok" : "status-pill-danger"} />
             <StatusTile label="推論引擎" statusLabel={status?.llm_ok ? "Ready" : "Offline"} value={status?.llm_ok ? "Gemma Ready" : "Engine Offline"} detail={status?.model ?? "Gemma 4 E4B"} tone={status?.llm_ok ? "status-pill-ok" : "status-pill-danger"} />
             <StatusTile label="模型端點" statusLabel="API" value="http://llama-cpp:8080" detail="OpenAI 相容 API" tone="status-pill-warn" />
-            <StatusTile label="報告儲存" statusLabel={sessionId ? "Ready" : "Standby"} value={sessionId ? "報告已建立" : "等待巡檢結果"} detail="支援轉出維護報告" tone={sessionId ? "status-pill-ok" : "status-pill-warn"} />
+            <StatusTile label="報告儲存" statusLabel={reportId ? "Ready" : "Standby"} value={reportId ? `已建立 ${reportId.slice(0, 8)}` : "等待巡檢結果"} detail="支援轉出維護報告" tone={reportId ? "status-pill-ok" : "status-pill-warn"} />
           </div>
         </Collapsible>
 
-        {/* 巡檢前確認 */}
         <Collapsible
           kicker="Preflight"
           title="巡檢前確認"
@@ -320,7 +609,6 @@ export default function VlmPage() {
           </div>
         </Collapsible>
 
-        {/* 建議巡檢場景 */}
         <Collapsible
           kicker="Inspection Scenarios"
           title="建議巡檢場景"
@@ -341,7 +629,7 @@ export default function VlmPage() {
               <div className="flex items-start gap-2.5">
                 <Zap className="mt-0.5 h-3.5 w-3.5 flex-shrink-0 text-amber-300" />
                 <p className="text-xs leading-5 text-slate-300">
-                  拍攝異常 → 點「儲存為報告」→ 點「知識庫比對」輸入現象描述，3 步完成現場診斷記錄。
+                  建立會話 → 外部視窗巡檢 → 貼上 JSON → 儲存報告，完成半自動整合流程。
                 </p>
               </div>
             </div>
