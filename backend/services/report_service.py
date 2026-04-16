@@ -36,6 +36,7 @@ def vlm_json_to_markdown(vlm_json: dict[str, Any], equipment_name: str = "") -> 
     scene = vlm_json.get("scene", "diagnosis")
     risk  = vlm_json.get("risk_level") or vlm_json.get("overall_risk_level") or "moderate"
     emoji = _risk_emoji(risk)
+    capture_meta = vlm_json.get("_capture_metadata") if isinstance(vlm_json.get("_capture_metadata"), dict) else None
 
     lines += [
         f"# {equipment_name or '設備'} 維護診斷報告",
@@ -47,6 +48,20 @@ def vlm_json_to_markdown(vlm_json: dict[str, Any], equipment_name: str = "") -> 
         "---",
         "",
     ]
+
+    if capture_meta:
+        lines += ["## 會話資訊", ""]
+        if session_id := capture_meta.get("session_id"):
+            lines.append(f"- Session ID：`{session_id}`")
+        if captured_at := capture_meta.get("captured_at"):
+            lines.append(f"- Captured At：`{captured_at}`")
+        if source := capture_meta.get("source"):
+            lines.append(f"- Source：`{source}`")
+        if equipment_id := capture_meta.get("equipment_id"):
+            lines.append(f"- Equipment ID：`{equipment_id}`")
+        if operator_note := capture_meta.get("operator_note"):
+            lines.extend(["", "### 操作員備註", "", str(operator_note)])
+        lines.append("")
 
     # 異常現象
     if summary := vlm_json.get("anomaly_summary") or vlm_json.get("findings_summary"):

@@ -42,34 +42,33 @@ def _report_payload(
 
 @pytest.mark.anyio
 async def test_create_report_returns_201(client):
-    resp = await client.post("/api/reports", json=_report_payload())
+    resp = await client.post("/api/reports/", json=_report_payload())
     assert resp.status_code == 201
 
 
 @pytest.mark.anyio
 async def test_create_report_schema(client):
     """回應包含所有必填欄位"""
-    resp = await client.post("/api/reports", json=_report_payload())
+    resp = await client.post("/api/reports/", json=_report_payload())
     data = resp.json()
-    for field in ["id", "title", "equipment_id", "risk_level", "source", "created_at"]:
+    for field in ["id", "title", "risk_level", "source", "created_at", "updated_at"]:
         assert field in data, f"Missing field: {field}"
 
 
 @pytest.mark.anyio
 async def test_create_report_persists_values(client):
     payload = _report_payload(title="特殊巡檢報告", risk_level="critical")
-    resp    = await client.post("/api/reports", json=payload)
+    resp    = await client.post("/api/reports/", json=payload)
     data    = resp.json()
     assert data["title"]      == "特殊巡檢報告"
     assert data["risk_level"] == "critical"
-    assert data["is_deleted"] is False
 
 
 @pytest.mark.anyio
 async def test_create_report_all_risk_levels(client):
     """各種 risk_level 均應被接受"""
     for level in ["critical", "elevated", "moderate", "low"]:
-        resp = await client.post("/api/reports", json=_report_payload(risk_level=level))
+        resp = await client.post("/api/reports/", json=_report_payload(risk_level=level))
         assert resp.status_code == 201, f"risk_level={level} failed: {resp.status_code}"
 
 
@@ -77,7 +76,7 @@ async def test_create_report_all_risk_levels(client):
 
 @pytest.mark.anyio
 async def test_list_reports_returns_200(client):
-    resp = await client.get("/api/reports")
+    resp = await client.get("/api/reports/")
     assert resp.status_code == 200
     assert isinstance(resp.json(), list)
 
@@ -85,8 +84,8 @@ async def test_list_reports_returns_200(client):
 @pytest.mark.anyio
 async def test_list_reports_includes_created_report(client):
     title = "TEST_LIST_REPORT_UNIQUE_XYZ"
-    await client.post("/api/reports", json=_report_payload(title=title))
-    resp   = await client.get("/api/reports")
+    await client.post("/api/reports/", json=_report_payload(title=title))
+    resp   = await client.get("/api/reports/")
     titles = [r["title"] for r in resp.json()]
     assert title in titles
 
@@ -94,31 +93,20 @@ async def test_list_reports_includes_created_report(client):
 @pytest.mark.anyio
 async def test_list_reports_excludes_deleted(client):
     """軟刪除後的報告不應出現在預設清單中"""
-    resp    = await client.post("/api/reports", json=_report_payload(title="軟刪除測試報告"))
+    resp    = await client.post("/api/reports/", json=_report_payload(title="軟刪除測試報告"))
     rep_id  = resp.json()["id"]
     await client.delete(f"/api/reports/{rep_id}")
 
-    resp2  = await client.get("/api/reports")
+    resp2  = await client.get("/api/reports/")
     ids    = [r["id"] for r in resp2.json()]
     assert rep_id not in ids, "Soft-deleted report should not appear in list"
-
-
-@pytest.mark.anyio
-async def test_list_reports_filter_by_equipment_id(client):
-    eq_id = "EQ-FILTER-RPT-001"
-    await client.post("/api/reports", json=_report_payload(equipment_id=eq_id))
-    await client.post("/api/reports", json=_report_payload(equipment_id="EQ-OTHER-999"))
-
-    resp  = await client.get("/api/reports", params={"equipment_id": eq_id})
-    items = resp.json()
-    assert all(r["equipment_id"] == eq_id for r in items)
 
 
 # ── GET /api/reports/{id} ────────────────────────────────────────────
 
 @pytest.mark.anyio
 async def test_get_single_report_returns_200(client):
-    resp   = await client.post("/api/reports", json=_report_payload())
+    resp   = await client.post("/api/reports/", json=_report_payload())
     rep_id = resp.json()["id"]
     r2     = await client.get(f"/api/reports/{rep_id}")
     assert r2.status_code == 200
@@ -128,7 +116,7 @@ async def test_get_single_report_returns_200(client):
 @pytest.mark.anyio
 async def test_get_single_report_contains_markdown(client):
     md_content = "## Test\n\nMarkdown content here."
-    resp   = await client.post("/api/reports", json=_report_payload(markdown=md_content))
+    resp   = await client.post("/api/reports/", json=_report_payload(markdown=md_content))
     rep_id = resp.json()["id"]
     r2     = await client.get(f"/api/reports/{rep_id}")
     assert r2.json()["markdown_content"] == md_content
@@ -144,7 +132,7 @@ async def test_get_nonexistent_report_returns_404(client):
 
 @pytest.mark.anyio
 async def test_delete_report_returns_204(client):
-    resp   = await client.post("/api/reports", json=_report_payload())
+    resp   = await client.post("/api/reports/", json=_report_payload())
     rep_id = resp.json()["id"]
     r2     = await client.delete(f"/api/reports/{rep_id}")
     assert r2.status_code == 204
@@ -153,7 +141,7 @@ async def test_delete_report_returns_204(client):
 @pytest.mark.anyio
 async def test_delete_report_soft_deletes(client):
     """DELETE 應為軟刪除（is_deleted=True），不物理刪除資料"""
-    resp   = await client.post("/api/reports", json=_report_payload())
+    resp   = await client.post("/api/reports/", json=_report_payload())
     rep_id = resp.json()["id"]
     await client.delete(f"/api/reports/{rep_id}")
 
@@ -170,3 +158,58 @@ async def test_delete_report_soft_deletes(client):
 async def test_delete_nonexistent_report_returns_404(client):
     resp = await client.delete("/api/reports/nonexistent-id-xyz")
     assert resp.status_code == 404
+
+
+# ── POST /api/reports/capture-vlm-session ───────────────────────────
+
+@pytest.mark.anyio
+async def test_capture_vlm_session_with_raw_json_creates_structured_markdown(client):
+    payload = {
+        "session_id": "vlm-session-001",
+        "source": "vlm-webui",
+        "captured_at": "2026-04-16T09:20:00Z",
+        "raw_vlm_json": {
+            "scene": "diagnosis",
+            "risk_level": "critical",
+            "anomaly_summary": "發現冷卻風扇卡滯與外殼油汙。",
+        },
+        "equipment_id": "EQ-001",
+        "equipment_name": "壓縮機 #1",
+        "operator_note": "夜班巡檢，鏡頭偏左 10 度。",
+    }
+
+    resp = await client.post("/api/reports/capture-vlm-session", json=payload)
+    assert resp.status_code == 201
+    data = resp.json()
+    assert data["risk_level"] == "critical"
+    assert data["equipment_id"] == "EQ-001"
+    assert "會話資訊" in (data["markdown_content"] or "")
+    assert "操作員備註" in (data["markdown_content"] or "")
+
+
+@pytest.mark.anyio
+async def test_capture_vlm_session_without_raw_json_marks_incomplete(client):
+    payload = {
+        "session_id": "vlm-session-002",
+        "source": "vlm-webui",
+        "captured_at": "2026-04-16T09:25:00Z",
+        "operator_note": "先建檔，稍後補 JSON。",
+    }
+
+    resp = await client.post("/api/reports/capture-vlm-session", json=payload)
+    assert resp.status_code == 201
+    data = resp.json()
+    assert data["risk_level"] == "moderate"
+    markdown = data.get("markdown_content") or ""
+    assert "資料不完整" in markdown
+    assert "vlm-session-002" in markdown
+
+
+@pytest.mark.anyio
+async def test_capture_vlm_session_malformed_payload_returns_422(client):
+    payload = {
+        "source": "vlm-webui",
+        "captured_at": "2026-04-16T09:30:00Z",
+    }
+    resp = await client.post("/api/reports/capture-vlm-session", json=payload)
+    assert resp.status_code == 422

@@ -86,6 +86,9 @@ export interface VlmSessionCapture {
   source:        string;
   captured_at:   string;
   raw_vlm_json?: Record<string, unknown>;
+  equipment_id?: string;
+  equipment_name?: string;
+  operator_note?: string;
 }
 
 // ── RAG ──────────────────────────────────────────────────────────────

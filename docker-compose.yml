@@ -7,20 +7,19 @@
 # 快速啟動：make up
 # 首次啟動：make setup && make up
 #
-# 服務清單（共 8 個）：
+# 服務清單（共 9 個）：
 #   [1] model-init   — 自動下載 GGUF 模型（一次性任務）
 #   [2] mosquitto    — Eclipse Mosquitto MQTT Broker (Port 1883/9001)
 #   [3] llama-cpp    — Gemma 4 E4B 推論引擎 (Port 8080)
-#   [4] vlm-webui    — 即時視覺分析 WebUI (Port 8090, WebRTC)
-#   [5] backend      — FastAPI 中介層 (Port 8000) + /metrics Prometheus
-#   [6] frontend     — Next.js 儀表板 (Port 3000)
-#   [7] nginx        — 反向代理 (Port 80)
-#   [8] cadvisor     — 容器資源監控 Web UI (Port 8091)  ← 3.3 可觀測性
+#   [4] realsense-rtsp — D435i 彩色流 → RTSP 內部橋接 (Port 8554, internal)
+#   [5] vlm-webui    — 即時視覺分析 WebUI (Port 8090, WebRTC)
+#   [6] backend      — FastAPI 中介層 (Port 8000) + /metrics Prometheus
+#   [7] frontend     — Next.js 儀表板 (Port 3000)
+#   [8] nginx        — 反向代理 (Port 80)
+#   [9] cadvisor     — 容器資源監控 Web UI (Port 8091)  ← 3.3 可觀測性
 ###############################################################################
 
 name: xcloudvlmui-platform
-
-version: "3.9"
 
 # ── 共用環境變數 ─────────────────────────────────────────────────────
 x-llm-env: &llm-env
@@ -52,32 +51,22 @@ services:
       - model-data:/models
     environment:
       - HF_TOKEN=${HF_TOKEN:-}
-      - MODEL_REPO=${MODEL_REPO:-bartowski/google_gemma-4-e4b-it-GGUF}
-      - MODEL_FILE=${MODEL_FILE:-gemma-4-e4b-it-Q4_K_M.gguf}
+      - MODEL_REPO=${MODEL_REPO:-unsloth/gemma-4-E4B-it-GGUF}
+      - MODEL_FILE=${MODEL_FILE:-gemma-4-E4B-it-Q4_K_M.gguf}
       - HF_HUB_DISABLE_PROGRESS_BARS=0
     command: >
-      /bin/bash -c "
-        MODEL=/models/$${MODEL_FILE} ;
-        if [ -f \"$$MODEL\" ]; then
-          echo '✓ 模型已存在，跳過下載。' ;
-          ls -lh $$MODEL ;
-          exit 0 ;
-        fi ;
-        echo '正在安裝 huggingface_hub...' ;
-        pip install -q huggingface_hub ;
-        echo '開始下載 Gemma 4 E4B GGUF Q4_K_M (~4GB)...' ;
-        python3 -c "
-          from huggingface_hub import hf_hub_download ;
-          import os ;
-          token = os.environ.get('HF_TOKEN') or None ;
-          repo  = os.environ.get('MODEL_REPO', 'bartowski/google_gemma-4-e4b-it-GGUF') ;
-          fname = os.environ.get('MODEL_FILE', 'gemma-4-e4b-it-Q4_K_M.gguf') ;
-          print(f'下載 {repo}/{fname}') ;
-          path  = hf_hub_download(repo_id=repo, filename=fname, token=token, local_dir='/models', local_dir_use_symlinks=False) ;
-          print(f'完成: {path}') ;
-          import subprocess ; subprocess.run(['ls','-lh','/models'])
-        " ;
-      "
+      /bin/bash -c '
+        MODEL=/models/$${MODEL_FILE};
+        if [ -f "$$MODEL" ]; then
+          echo "✓ 模型已存在: $$MODEL";
+          ls -lh "$$MODEL";
+          exit 0;
+        else
+          echo "❌ 模型不存在: $$MODEL";
+          echo "請先執行 make setup 下載模型";
+          exit 1;
+        fi
+      '
     restart: "no"
     logging: *default-logging
 
@@ -120,26 +109,27 @@ services:
       - model-data:/models:ro
     # Gemma 4 E4B: 128K context, Q4_K_M ~4GB VRAM
     # AIR-030 64GB 剩餘記憶體全做 KV Cache
-    command: >
-      /bin/bash -c "
-        echo 'Waiting for model...' ;
-        until [ -f /models/$${MODEL_FILE:-gemma-4-e4b-it-Q4_K_M.gguf} ]; do
-          sleep 5 ;
-        done ;
-        echo 'Starting llama-server...' ;
-        llama-server
-          --model /models/gemma-4-e4b-it-Q4_K_M.gguf
-          --host 0.0.0.0
-          --port 8080
-          --n-gpu-layers 999
-          --ctx-size 131072
-          --threads 8
-          --batch-size 512
-          --ubatch-size 512
-          --embedding
+    command:
+      - /bin/bash
+      - -c
+      - |
+        echo 'Waiting for model...'
+        until [ -f /models/gemma-4-E4B-it-Q4_K_M.gguf ]; do
+          sleep 5
+        done
+        echo 'Starting llama-server...'
+        exec llama-server \
+          --model /models/gemma-4-E4B-it-Q4_K_M.gguf \
+          --mmproj /models/mmproj-BF16.gguf \
+          --host 0.0.0.0 \
+          --port 8080 \
+          --n-gpu-layers 999 \
+          --ctx-size 131072 \
+          --threads 8 \
+          --batch-size 512 \
+          --ubatch-size 512 \
+          --embedding \
           --alias gemma-4-e4b-it
-          --log-disable
-      "
     ports:
       - "8080:8080"
     depends_on:
@@ -161,13 +151,47 @@ services:
     logging: *default-logging
 
   # ──────────────────────────────────────────────────────────────────
-  # [4] vlm-webui — Live VLM WebUI (Port 8090, WebRTC)
+  # [4] realsense-rtsp — D435i 彩色流橋接（V4L2 -> RTSP）
+  #     目標：讓遠端瀏覽器不需直接讀 Jetson 本機攝影機
+  # ──────────────────────────────────────────────────────────────────
+  realsense-rtsp:
+    image: bluenviron/mediamtx:latest-ffmpeg
+    container_name: realsense-rtsp
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:8554:8554"   # 僅本機診斷用，不對外網卡開放
+    environment:
+      # 注意：D435i 在本機的彩色流通常是 /dev/video4（YUYV）
+      - D435I_VIDEO_DEVICE=/dev/video4
+      - D435I_RESOLUTION=640x480
+      - D435I_FPS=30
+      # mediamtx path: rtsp://realsense-rtsp:8554/d435i
+      - MTX_PATHS_D435I_RUNONINIT=ffmpeg -hide_banner -loglevel warning -f v4l2 -input_format yuyv422 -framerate $${D435I_FPS} -video_size $${D435I_RESOLUTION} -i $${D435I_VIDEO_DEVICE} -an -vf format=yuv420p -c:v libx264 -preset ultrafast -tune zerolatency -g 30 -f rtsp rtsp://127.0.0.1:8554/d435i
+      - MTX_PATHS_D435I_RUNONINITRESTART=yes
+    devices:
+      - /dev/video4:/dev/video4
+    volumes:
+      - /dev/v4l/by-id:/dev/v4l/by-id:ro
+    healthcheck:
+      test: ["CMD-SHELL", "ffprobe -v error -rtsp_transport tcp -select_streams v:0 -show_entries stream=codec_name -of csv=p=0 rtsp://127.0.0.1:8554/d435i >/dev/null 2>&1"]
+      interval: 15s
+      timeout:  8s
+      retries:  8
+      start_period: 20s
+    logging: *default-logging
+
+  # ──────────────────────────────────────────────────────────────────
+  # [5] vlm-webui — Live VLM WebUI (Port 8090, WebRTC)
   #     架構圖：MIDDLE LAYER → Live VLM WebUI Port 8090
   # ──────────────────────────────────────────────────────────────────
   vlm-webui:
     build:
       context:    ./vlm-webui
       dockerfile: Dockerfile.vlm
+      args:
+        - LIVE_VLM_DEFAULT_INPUT_SOURCE=rtsp
+        - LIVE_VLM_DEFAULT_RTSP_URL=rtsp://realsense-rtsp:8554/d435i
+        - LIVE_VLM_DEFAULT_API_BASE=http://llama-cpp:8080/v1
     container_name: vlm-webui
     restart: unless-stopped
     runtime: nvidia
@@ -176,19 +200,34 @@ services:
       - LIVE_VLM_API_BASE=http://llama-cpp:8080/v1
       - LIVE_VLM_PORT=8090
       - LIVE_VLM_HOST=0.0.0.0
+      - LIVE_VLM_DEFAULT_INPUT_SOURCE=rtsp
+      - LIVE_VLM_DEFAULT_RTSP_URL=rtsp://realsense-rtsp:8554/d435i
+      - LIVE_VLM_DEFAULT_API_BASE=http://llama-cpp:8080/v1
     ports:
       - "8090:8090"
       - "49152-49200:49152-49200/udp"    # WebRTC ICE UDP
     volumes:
       - ./ssl:/ssl:ro
+      - /dev/v4l/by-id:/dev/v4l/by-id:ro
+      - /dev/bus/usb:/dev/bus/usb
     depends_on:
       llama-cpp:
         condition: service_healthy
+      realsense-rtsp:
+        condition: service_healthy
     devices:
-      - /dev/video0:/dev/video0    # USB 鏡頭（可選）
+      # 映射 D435i 全部 video 節點，避免只看到深度流（/dev/video0=Z16）
+      - /dev/video0:/dev/video0
+      - /dev/video1:/dev/video1
+      - /dev/video2:/dev/video2
+      - /dev/video3:/dev/video3
+      - /dev/video4:/dev/video4
+      - /dev/video5:/dev/video5
+      - /dev/media1:/dev/media1
+      - /dev/media2:/dev/media2
     healthcheck:
-      # HTTP GET / → 任何 2xx/3xx 視為健康
-      test: ["CMD", "curl", "-sf", "--max-time", "4", "http://localhost:8090/"]
+      # HTTPS GET / → 任何 2xx/3xx 視為健康（vlm-webui 預設使用自簽 SSL）
+      test: ["CMD", "curl", "-skf", "--max-time", "4", "https://localhost:8090/"]
       interval: 30s
       timeout:  10s
       retries:  5
@@ -203,7 +242,7 @@ services:
     logging: *default-logging
 
   # ──────────────────────────────────────────────────────────────────
-  # [5] backend — FastAPI 中介層 (Port 8000)
+  # [6] backend — FastAPI 中介層 (Port 8000)
   #     架構圖：BOTTOM LAYER → FastAPI 中介層
   # ──────────────────────────────────────────────────────────────────
   backend:
@@ -245,7 +284,7 @@ services:
     logging: *default-logging
 
   # ──────────────────────────────────────────────────────────────────
-  # [6] frontend — Next.js Web Dashboard (Port 3000)
+  # [7] frontend — Next.js Web Dashboard (Port 3000)
   #     架構圖：BOTTOM LAYER → Web 儀表板
   # ──────────────────────────────────────────────────────────────────
   frontend:
@@ -257,8 +296,10 @@ services:
     environment:
       - NEXTAUTH_URL=http://localhost
       - NEXT_PUBLIC_API_URL=http://backend:8000
-      - NEXT_PUBLIC_VLM_WEBUI_URL=http://localhost/vlm
+      - NEXT_PUBLIC_VLM_WEBUI_URL=/vlm
+      - NEXT_PUBLIC_VLM_STANDALONE_URL=
       - NODE_ENV=production
+      - HOSTNAME=0.0.0.0
     env_file:
       - path: ./frontend/.env.local
         required: false
@@ -268,7 +309,7 @@ services:
       backend:
         condition: service_healthy
     healthcheck:
-      test: ["CMD", "curl", "-sf", "http://localhost:3000"]
+      test: ["CMD-SHELL", "wget -qO /dev/null http://0.0.0.0:3000/ || exit 1"]
       interval: 20s
       timeout:  10s
       retries:  5
@@ -276,7 +317,7 @@ services:
     logging: *default-logging
 
   # ──────────────────────────────────────────────────────────────────
-  # [7] nginx — 反向代理 (Port 80)
+  # [8] nginx — 反向代理 (Port 80)
   # ──────────────────────────────────────────────────────────────────
   nginx:
     image: nginx:1.25-alpine
@@ -291,7 +332,7 @@ services:
       - backend
       - vlm-webui
     healthcheck:
-      test: ["CMD", "wget", "-qO-", "http://localhost/api/health"]
+      test: ["CMD-SHELL", "test -f /var/run/nginx.pid && ps aux | grep -q '[n]ginx'"]
       interval: 30s
       timeout:  5s
       retries:  3
@@ -299,7 +340,7 @@ services:
     logging: *default-logging
 
   # ──────────────────────────────────────────────────────────────────
-  # [8] cadvisor — 容器資源監控（CPU / 記憶體 / 磁碟 / 網路）
+  # [9] cadvisor — 容器資源監控（CPU / 記憶體 / 磁碟 / 網路）
   #     3.3 監控與可觀測性：對應 RISK R001（VRAM 耗盡）、R005（磁碟空間）
   #     Web UI：http://AIR-030-IP:8091
   #     Metrics：http://AIR-030-IP:8091/metrics（Prometheus 格式）
@@ -338,8 +379,12 @@ services:
 
 # ── Named Volumes ────────────────────────────────────────────────────
 volumes:
-  model-data:        # GGUF 模型檔案（由 model-init 下載）
+  model-data:        # GGUF 模型檔案（bind mount 至主機 ./models）
     driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: ${PWD}/models
   backend-data:      # SQLite DB + ChromaDB vector store
     driver: local
   mosquitto-data:    # MQTT Broker 持久化訊息

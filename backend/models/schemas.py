@@ -148,6 +148,9 @@ class VlmSessionCapture(BaseModel):
     source:       str = "vlm-webui"
     captured_at:  str
     raw_vlm_json: Optional[dict[str, Any]] = None
+    equipment_id: Optional[str] = None
+    equipment_name: Optional[str] = None
+    operator_note: Optional[str] = None
 
 
 # ── RAG ───────────────────────────────────────────────────────────────
