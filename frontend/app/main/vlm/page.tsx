@@ -128,7 +128,24 @@ export default function VlmPage() {
   const [equipments, setEquipments] = useState<Equipment[]>([]);
   const [selectedEquipmentId, setSelectedEquipmentId] = useState("");
 
-  const VLM_URL = process.env.NEXT_PUBLIC_VLM_WEBUI_URL ?? "http://localhost:8090";
+  const VLM_URL = process.env.NEXT_PUBLIC_VLM_WEBUI_URL ?? "/vlm";
+  const configuredStandaloneVlmUrl = process.env.NEXT_PUBLIC_VLM_STANDALONE_URL?.trim() ?? "";
+  const withSyncFlag = useCallback(
+    (url: string) => (url.includes("?") ? `${url}&xcloud_sync=1` : `${url}?xcloud_sync=1`),
+    [],
+  );
+  const VLM_SYNC_URL = useMemo(() => withSyncFlag(VLM_URL), [VLM_URL, withSyncFlag]);
+  const STANDALONE_VLM_URL = useMemo(
+    () => (configuredStandaloneVlmUrl ? withSyncFlag(configuredStandaloneVlmUrl) : "https://<current-host>:8090/?xcloud_sync=1"),
+    [configuredStandaloneVlmUrl, withSyncFlag],
+  );
+  const resolveStandaloneVlmUrl = useCallback(() => {
+    if (configuredStandaloneVlmUrl) {
+      return withSyncFlag(configuredStandaloneVlmUrl);
+    }
+    const host = window.location.hostname;
+    return `https://${host}:8090/?xcloud_sync=1`;
+  }, [configuredStandaloneVlmUrl, withSyncFlag]);
 
   const selectedEquipment = useMemo(
     () => equipments.find((item) => item.id === selectedEquipmentId) ?? null,
@@ -266,8 +283,32 @@ export default function VlmPage() {
     if (sessionState === "idle") {
       handleStartSession();
     }
+    const standaloneVlmUrl = resolveStandaloneVlmUrl();
 
-    const popup = window.open(VLM_URL, "xcloud-vlm-standalone", "noopener,noreferrer");
+    const existingPopup = standaloneWindowRef.current;
+    if (existingPopup && !existingPopup.closed) {
+      let popupToFocus: Window = existingPopup;
+      try {
+        if (existingPopup.location.href !== standaloneVlmUrl) {
+          existingPopup.location.href = standaloneVlmUrl;
+        }
+      } catch {
+        const replacement = window.open(standaloneVlmUrl, "_blank", "noopener,noreferrer");
+        if (!replacement) {
+          setStandaloneState("blocked");
+          toast.error("瀏覽器阻擋了新視窗，請允許彈出視窗後再試。", { duration: 4500 });
+          return;
+        }
+        standaloneWindowRef.current = replacement;
+        popupToFocus = replacement;
+      }
+      setStandaloneState("opened");
+      popupToFocus.focus();
+      startStandaloneMonitor();
+      return;
+    }
+
+    const popup = window.open(standaloneVlmUrl, "_blank", "noopener,noreferrer");
     if (!popup) {
       setStandaloneState("blocked");
       toast.error("瀏覽器阻擋了新視窗，請允許彈出視窗後再試。", { duration: 4500 });
@@ -410,7 +451,7 @@ export default function VlmPage() {
         >
           <iframe
             key={iframeKey}
-            src={VLM_URL}
+            src={VLM_SYNC_URL}
             className="h-full w-full border-0"
             title="live-vlm-webui"
             allow="camera; microphone; autoplay; clipboard-write"
@@ -436,7 +477,7 @@ export default function VlmPage() {
               <p className="text-[10px] uppercase tracking-[0.2em] text-slate-500">Standalone Window</p>
               <span className={`status-pill ${standaloneTone}`}>{standaloneLabel}</span>
             </div>
-            <p className="mt-3 text-sm font-semibold text-white">{VLM_URL}</p>
+            <p className="mt-3 text-sm font-semibold text-white">{STANDALONE_VLM_URL}</p>
             <p className="mt-1 text-xs text-slate-400">Opened At: {standaloneOpenedAt ? new Date(standaloneOpenedAt).toLocaleString("zh-TW") : "-"}</p>
           </div>
 

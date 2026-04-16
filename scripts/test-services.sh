@@ -48,13 +48,13 @@ echo -e "${BLUE}  xCloudVLMUI 服務健康檢查${NC}"
 echo -e "${BLUE}══════════════════════════════════════════${NC}\n"
 
 # ── llama.cpp ─────────────────────────────────────────────────────
-echo -e "${YELLOW}[1/5] llama.cpp Server (:8080)${NC}"
+echo -e "${YELLOW}[1/6] llama.cpp Server (:8080)${NC}"
 check   "Health Endpoint"  "http://localhost:8080/health"
 json_check "Models List"   "http://localhost:8080/v1/models" "data"
 
 # ── 推論測試 ──────────────────────────────────────────────────────
 echo ""
-echo -e "${YELLOW}[2/5] Gemma 4 E4B 推論測試${NC}"
+echo -e "${YELLOW}[2/6] Gemma 4 E4B 推論測試${NC}"
 echo -ne "  ${BLUE}►${NC} 呼叫 /v1/chat/completions（約 10-30 秒）... "
 INFER_RESULT=$(curl -sk --max-time 60 \
   -X POST http://localhost:8080/v1/chat/completions \
@@ -71,20 +71,41 @@ fi
 
 # ── FastAPI Backend ───────────────────────────────────────────────
 echo ""
-echo -e "${YELLOW}[3/5] FastAPI Backend (:8000)${NC}"
+echo -e "${YELLOW}[3/6] FastAPI Backend (:8000)${NC}"
 check      "Root Endpoint"    "http://localhost:8000/"
 json_check "Health Check"     "http://localhost:8000/api/health"  "status"
 check      "Dashboard API"    "http://localhost:8000/api/dashboard/summary"
 check      "Swagger Docs"     "http://localhost:8000/docs"
 
+# ── D435i RTSP Bridge ─────────────────────────────────────────────
+echo ""
+echo -e "${YELLOW}[4/6] RealSense RTSP Bridge (:8554 localhost only)${NC}"
+if docker compose ps realsense-rtsp 2>/dev/null | grep -q "realsense-rtsp"; then
+  echo -e "  ${GREEN}✓${NC} realsense-rtsp 容器存在"
+  ((PASS+=1))
+else
+  echo -e "  ${RED}✗${NC} 找不到 realsense-rtsp 容器"
+  ((FAIL+=1))
+fi
+
+if docker exec realsense-rtsp ffprobe -v error -rtsp_transport tcp \
+  -select_streams v:0 -show_entries stream=codec_name,width,height \
+  -of default=nw=1 rtsp://127.0.0.1:8554/d435i >/dev/null 2>&1; then
+  echo -e "  ${GREEN}✓${NC} D435i RTSP 串流可讀取"
+  ((PASS+=1))
+else
+  echo -e "  ${RED}✗${NC} D435i RTSP 串流不可讀取（檢查 /dev/video4 與 realsense-rtsp logs）"
+  ((FAIL+=1))
+fi
+
 # ── live-vlm-webui ────────────────────────────────────────────────
 echo ""
-echo -e "${YELLOW}[4/5] live-vlm-webui (:8090)${NC}"
+echo -e "${YELLOW}[5/6] live-vlm-webui (:8090)${NC}"
 check "WebUI Root"  "https://localhost:8090/" "200|301|302|307"
 
 # ── Next.js Frontend ──────────────────────────────────────────────
 echo ""
-echo -e "${YELLOW}[5/5] Next.js Frontend (:3000 / nginx :80)${NC}"
+echo -e "${YELLOW}[6/6] Next.js Frontend (:3000 / nginx :80)${NC}"
 check "Frontend :3000"     "http://localhost:3000/" "200|301|302|307"
 check "Via Nginx :80"      "http://localhost/" "200|301|302|307"
 check "API via Nginx"      "http://localhost/api/health"
