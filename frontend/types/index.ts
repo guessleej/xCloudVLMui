@@ -252,6 +252,24 @@ export interface PipelineStatus {
   checked_at: string;
 }
 
+// ── Chat History ─────────────────────────────────────────────────────
+export interface ChatHistoryItem {
+  id:          string;
+  session_id?: string;
+  question:    string;
+  answer:      string;
+  sources?:    RagSource[];
+  latency_ms?: number;
+  notes?:      string;
+  created_at:  string;
+  updated_at:  string;
+}
+
+export interface ChatHistoryListResponse {
+  total: number;
+  items: ChatHistoryItem[];
+}
+
 // ── 事件中心 / Syslog ─────────────────────────────────────────────────
 export interface SysLog {
   id:          number;

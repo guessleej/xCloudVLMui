@@ -485,3 +485,31 @@ class VisionStats(BaseModel):
     avg_vhs_score:     Optional[float]  = None
     recent_hazards_24h: int
     total_person_detections: int
+
+
+# ── Chat History ───────────────────────────────────────────────────────
+
+class ChatHistorySource(BaseModel):
+    filename:    Optional[str]  = None
+    chunk_index: Optional[int]  = None
+    score:       Optional[float] = None
+    preview:     Optional[str]  = None
+
+class ChatHistoryOut(BaseModel):
+    id:          str
+    session_id:  Optional[str]  = None
+    question:    str
+    answer:      str
+    sources:     Optional[list] = None
+    latency_ms:  Optional[int]  = None
+    notes:       Optional[str]  = None
+    created_at:  datetime
+    updated_at:  datetime
+    model_config = {"from_attributes": True}
+
+class ChatHistoryUpdate(BaseModel):
+    notes:    Optional[str]  = None    # 使用者備註（可空字串表示清除）
+
+class ChatHistoryListResponse(BaseModel):
+    total:  int
+    items:  list[ChatHistoryOut]

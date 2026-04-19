@@ -92,9 +92,9 @@ export const reportsApi = {
 
 // ── RAG ────────────────────────────────────────────────────────────
 export const ragApi = {
-  /** 語意問答 */
+  /** 語意問答（走 /api/chat/query 自動存歷史）*/
   query: (payload: { question: string; session_id?: string; top_k?: number }) =>
-    apiClient.post("/api/rag/query", payload),
+    apiClient.post("/api/chat/query", payload),
   /** 文件列表 */
   listDocuments: () =>
     apiClient.get("/api/rag/documents"),
@@ -112,6 +112,22 @@ export const ragApi = {
       headers: { "Content-Type": "multipart/form-data" },
       timeout: 180_000,  // OCR 需要較長時間
     }),
+};
+
+// ── Chat History ───────────────────────────────────────────────────
+export const chatHistoryApi = {
+  /** 查詢歷史列表 */
+  list: (params?: { session_id?: string; q?: string; limit?: number; offset?: number }) =>
+    apiClient.get("/api/chat/history", { params }),
+  /** 修改備註 */
+  updateNotes: (id: string, notes: string) =>
+    apiClient.patch(`/api/chat/history/${id}`, { notes }),
+  /** 刪除單筆 */
+  delete: (id: string) =>
+    apiClient.delete(`/api/chat/history/${id}`),
+  /** 清空全部（或指定 session） */
+  clearAll: (sessionId?: string) =>
+    apiClient.delete("/api/chat/history", { params: sessionId ? { session_id: sessionId } : {} }),
 };
 
 // ── VLM ────────────────────────────────────────────────────────────

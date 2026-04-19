@@ -223,3 +223,19 @@ class VisionSession(Base):
     duration_ms:    Mapped[Optional[int]]  = mapped_column(Integer,      nullable=True)   # VLM 推論耗時
 
     created_at:     Mapped[datetime]       = mapped_column(DateTime(timezone=True), default=_now, index=True)
+
+
+class ChatHistory(Base):
+    """知識庫問答歷史紀錄（每次 RAG 問答自動儲存）"""
+    __tablename__ = "chat_history"
+
+    id:           Mapped[str]            = mapped_column(String(64),  primary_key=True, default=lambda: str(_uuid.uuid4()))
+    session_id:   Mapped[Optional[str]]  = mapped_column(String(64),  nullable=True,  index=True)  # 同一會話的群組 ID
+    question:     Mapped[str]            = mapped_column(Text,        nullable=False)
+    answer:       Mapped[str]            = mapped_column(Text,        nullable=False)
+    sources:      Mapped[Optional[list]] = mapped_column(JSON,        nullable=True)    # [{filename, chunk_index, score, preview}]
+    latency_ms:   Mapped[Optional[int]]  = mapped_column(Integer,     nullable=True)
+    notes:        Mapped[Optional[str]]  = mapped_column(Text,        nullable=True)    # 使用者備註（可修改）
+    is_deleted:   Mapped[bool]           = mapped_column(Boolean,     default=False,    index=True)
+    created_at:   Mapped[datetime]       = mapped_column(DateTime(timezone=True), default=_now, index=True)
+    updated_at:   Mapped[datetime]       = mapped_column(DateTime(timezone=True), default=_now, onupdate=_now)

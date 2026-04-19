@@ -22,6 +22,8 @@ import {
   ExternalLink,
   Info,
   Loader2,
+  Maximize2,
+  Minimize2,
   Radar,
   RefreshCw,
   Save,
@@ -185,6 +187,7 @@ export default function VlmPage() {
   const [status,          setStatus]          = useState<VlmStatus | null>(null);
   const [statusLoading,   setStatusLoading]   = useState(false);
   const [cameraActive,    setCameraActive]    = useState(false);
+  const [isMaximized,     setIsMaximized]     = useState(false);
 
   // 知識庫比對
   const [showCompare,     setShowCompare]     = useState(false);
@@ -309,7 +312,13 @@ export default function VlmPage() {
       {/* ══════════════════════════════════════════════════════════════
           1. 現場影像主畫面
           ══════════════════════════════════════════════════════════ */}
-      <section className="panel-soft rounded-[32px] p-4 sm:p-5">
+      <section
+        className={
+          isMaximized
+            ? "fixed inset-0 z-50 overflow-y-auto bg-[#050a12] p-3 sm:p-4"
+            : "panel-soft rounded-[32px] p-4 sm:p-5"
+        }
+      >
 
         {/* 標題列 + 操作按鈕 */}
         <div className="flex flex-col gap-3 border-b border-white/8 pb-4 sm:flex-row sm:items-center sm:justify-between">
@@ -363,6 +372,19 @@ export default function VlmPage() {
             >
               <Database className="h-4 w-4" />
               知識庫比對
+            </button>
+
+            {/* ── 最大化/還原 ── */}
+            <button
+              onClick={() => setIsMaximized((v) => !v)}
+              className="secondary-button"
+              title={isMaximized ? "還原視窗" : "最大化畫面"}
+            >
+              {isMaximized
+                ? <Minimize2 className="h-4 w-4" />
+                : <Maximize2 className="h-4 w-4" />
+              }
+              {isMaximized ? "還原" : "最大化"}
             </button>
           </div>
         </div>
