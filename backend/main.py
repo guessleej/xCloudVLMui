@@ -83,6 +83,13 @@ async def lifespan(app: FastAPI):
     except Exception as _me:
         logger.warning("Could not seed default models: %s", _me)
 
+    # ── 啟動時植入行為安全 SOP 知識文件至 ChromaDB ───────────────────────
+    try:
+        from services.behavior_seed import seed_behavior_knowledge
+        await seed_behavior_knowledge()
+    except Exception as _be:
+        logger.warning("Behavior seed failed (non-fatal): %s", _be)
+
     logger.info("ChromaDB ready: %s", settings.chroma_persist_dir)
     logger.info("LLM endpoint: %s", settings.llm_base_url)
     logger.info("Embed model:  %s", settings.embed_model)
