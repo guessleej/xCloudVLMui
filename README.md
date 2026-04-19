@@ -6,7 +6,6 @@
 **工廠設備健康管理平台 · 工廠視覺 AI 指揮台**
 
 [![Platform](https://img.shields.io/badge/Platform-macOS%20%2F%20iPhone-000000?logo=apple&logoColor=white)]()
-[![Edge](https://img.shields.io/badge/Edge-Jetson%20AGX%20Orin%2064GB-76b900?logo=nvidia&logoColor=white)](https://www.nvidia.com/en-us/autonomous-machines/embedded-systems/jetson-agx-orin/)
 [![Python](https://img.shields.io/badge/Python-3.11-3776ab?logo=python&logoColor=white)]()
 [![FastAPI](https://img.shields.io/badge/FastAPI-0.110-009688?logo=fastapi&logoColor=white)]()
 [![Next.js](https://img.shields.io/badge/Next.js-14-000000?logo=nextdotjs&logoColor=white)]()
@@ -14,10 +13,23 @@
 [![Docker](https://img.shields.io/badge/Docker-Compose%20v2-2496ED?logo=docker&logoColor=white)]()
 [![License](https://img.shields.io/badge/License-Proprietary-red)]()
 
-> 由 **云碩科技 xCloudinfo Corp.Limited** 開發
-> 支援 **macOS + iPhone 相機串流**，以及 **Advantech AIR-030 (Jetson AGX Orin 64GB)** 邊緣主機部署
+> 由 **云碩科技 xCloudinfo Corp.Limited** 開發  
+> 本倉庫為 **macOS / Apple Silicon** 專用部署版本
 
 </div>
+
+---
+
+## 🌐 四平台部署總覽
+
+| 平台 | 倉庫 | 主要 Port | 架構 | 推論加速 |
+|------|------|-----------|------|----------|
+| **macOS** ← 本倉庫 | [xCloudVLMui](https://github.com/guessleej/xCloudVLMui) | `:3110` | ARM64 / x86 | Ollama (Apple Silicon) |
+| **AIR-030 JetPack 6.0** | [xCloudVLMui-air030](https://github.com/guessleej/xCloudVLMui-air030) | `:8880` | ARM64 | CUDA 12.2 / TensorRT |
+| **MIC-743 JetPack 7.1** | [xCloudVLMui-mic743](https://github.com/guessleej/xCloudVLMui-mic743) | `:8780` | ARM64 | CUDA 12.6 / TensorRT |
+| **x86-64 通用** | [xCloudVLMui-x86](https://github.com/guessleej/xCloudVLMui-x86) | `:8680` | AMD64 | CPU / 可選 NVIDIA GPU |
+
+---
 
 ---
 
