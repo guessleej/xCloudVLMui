@@ -116,13 +116,33 @@ export const ragApi = {
 
 // ── VLM ────────────────────────────────────────────────────────────
 export const vlmApi = {
-  /** 檢查 llama.cpp + live-vlm-webui 狀態 */
+  /** 檢查 llama.cpp 推論引擎狀態 */
   status: () =>
     apiClient.get("/api/vlm/status"),
-  /** 直接呼叫 VLM 診斷 */
-  diagnose: (payload: { prompt: string; image_base64?: string; max_tokens?: number }) =>
-    apiClient.post("/api/vlm/diagnose", payload),
+  /**
+   * 單次圖文診斷（HTTP POST，非串流）
+   * WebSocket 串流版本由 components/vlm/camera-stream.tsx 直接管理
+   */
+  diagnose: (payload: {
+    prompt:        string;
+    image_base64?: string;
+    max_tokens?:   number;
+    temperature?:  number;
+  }) => apiClient.post("/api/vlm/diagnose", payload),
 };
+
+/**
+ * 取得 VLM WebSocket 串流端點 URL
+ * 優先使用 NEXT_PUBLIC_WS_URL，否則從 window.location 推導（同源 Nginx 代理）
+ * 開發環境直連後端：設定 NEXT_PUBLIC_WS_URL=ws://localhost:8000
+ */
+export function getVlmWsUrl(): string {
+  if (typeof window === "undefined") return "ws://localhost:8000/api/vlm/ws";
+  const explicit = process.env.NEXT_PUBLIC_WS_URL;
+  if (explicit) return explicit.replace(/\/$/, "") + "/api/vlm/ws";
+  const proto = window.location.protocol === "https:" ? "wss:" : "ws:";
+  return `${proto}//${window.location.host}/api/vlm/ws`;
+}
 
 // ── Auth ────────────────────────────────────────────────────────────
 export const authApi = {

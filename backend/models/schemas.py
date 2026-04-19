@@ -135,6 +135,7 @@ class ReportOut(BaseModel):
     risk_level:       str
     source:           str
     markdown_content: Optional[str] = None
+    is_deleted:       bool          = False
     created_at:       datetime
     updated_at:       datetime
 
@@ -144,10 +145,13 @@ class ReportOut(BaseModel):
 
 class VlmSessionCapture(BaseModel):
     """VLM WebUI 巡檢結束後，前端呼叫此 API 觸發報告產生"""
-    session_id:   str
-    source:       str = "vlm-webui"
-    captured_at:  str
-    raw_vlm_json: Optional[dict[str, Any]] = None
+    session_id:       str
+    source:           str = "vlm-webui"
+    captured_at:      str
+    title:            Optional[str]           = None   # 自訂報告標題
+    risk_level:       Optional[str]           = None   # 前端推算的風險等級
+    markdown_content: Optional[str]           = None   # 若提供則直接存入，不再轉換
+    raw_vlm_json:     Optional[dict[str, Any]] = None
 
 
 # ── RAG ───────────────────────────────────────────────────────────────
@@ -241,6 +245,7 @@ class SettingsUpdate(BaseModel):
 # ── Feature Flags ─────────────────────────────────────────────────────
 
 class FeatureFlagOut(BaseModel):
+    id:          str
     key:         str
     enabled:     bool
     rollout_pct: int                          = 100
@@ -249,6 +254,7 @@ class FeatureFlagOut(BaseModel):
     # 透過 validation_alias 從 ORM 讀取，序列化仍輸出為 metadata
     metadata:    Optional[dict[str, Any]]    = Field(None, validation_alias="extra_config")
     updated_at:  datetime
+    created_at:  datetime
 
     model_config = {"from_attributes": True, "populate_by_name": True}
 
@@ -401,3 +407,81 @@ class MqttChartPoint(BaseModel):
     timestamp: datetime
     value:     Optional[float] = None
     quality:   str = "good"
+
+
+# ── Vision Session ────────────────────────────────────────────────────
+
+class VisionDetectionItem(BaseModel):
+    """單一 YOLO 偵測項目"""
+    class_id:   int
+    label:      str             # 中文名稱
+    label_en:   str             # 英文名稱
+    confidence: float
+    x: float; y: float         # 左上角，正規化 0–1
+    w: float; h: float         # 寬高，正規化 0–1
+    risk:       str             # critical|warning|safe|info
+    category:   str             # personnel|vehicle|hazard|equipment|product|other
+    track_id:   Optional[int] = None   # Events 模式 SORT track ID
+
+class VisionPoseKeypoint(BaseModel):
+    """單一姿態關鍵點"""
+    name:       str    # nose/left_eye/right_eye/left_ear/right_ear/…
+    x:          float  # 正規化 0–1
+    y:          float  # 正規化 0–1
+    visibility: float  # 0–1
+
+class VisionPosePerson(BaseModel):
+    """單人姿態資料"""
+    person_idx:  int
+    confidence:  float
+    keypoints:   list[VisionPoseKeypoint]  # 17 個關鍵點
+
+class VisionSessionCreate(BaseModel):
+    mode:           str                             # equipment|people|events|objects
+    equipment_id:   Optional[str]         = None
+    vlm_prompt:     Optional[str]         = None
+    vlm_result:     Optional[str]         = None
+    risk_level:     Optional[str]         = None
+    vhs_score:      Optional[int]         = None
+    five_s_score:   Optional[int]         = None
+    yolo_model:     str                   = "yolo26n"
+    yolo_task:      str                   = "detect"
+    detections:     Optional[list[dict]]  = None
+    person_count:   int                   = 0
+    vehicle_count:  int                   = 0
+    hazard_count:   int                   = 0
+    pose_keypoints: Optional[list[dict]]  = None
+    track_history:  Optional[list[dict]]  = None
+    segment_counts: Optional[dict]        = None
+    thumbnail:      Optional[str]         = None
+    duration_ms:    Optional[int]         = None
+
+class VisionSessionOut(BaseModel):
+    id:             str
+    mode:           str
+    equipment_id:   Optional[str]   = None
+    vlm_result:     Optional[str]   = None
+    risk_level:     Optional[str]   = None
+    vhs_score:      Optional[int]   = None
+    five_s_score:   Optional[int]   = None
+    yolo_model:     str
+    yolo_task:      str
+    detections:     Optional[list]  = None
+    person_count:   int
+    vehicle_count:  int
+    hazard_count:   int
+    pose_keypoints: Optional[list]  = None
+    track_history:  Optional[list]  = None
+    segment_counts: Optional[dict]  = None
+    thumbnail:      Optional[str]   = None
+    duration_ms:    Optional[int]   = None
+    created_at:     datetime
+    model_config = {"from_attributes": True}
+
+class VisionStats(BaseModel):
+    total_sessions:    int
+    by_mode:           dict[str, int]
+    by_risk:           dict[str, int]
+    avg_vhs_score:     Optional[float]  = None
+    recent_hazards_24h: int
+    total_person_detections: int

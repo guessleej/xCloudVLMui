@@ -179,3 +179,47 @@ class MqttAlertThreshold(Base):
     enabled:     Mapped[bool]          = mapped_column(Boolean,     default=True)
     created_at:  Mapped[datetime]      = mapped_column(DateTime(timezone=True), default=_now)
     updated_at:  Mapped[datetime]      = mapped_column(DateTime(timezone=True), default=_now, onupdate=_now)
+
+
+class VisionSession(Base):
+    """視覺分析會話（YOLO + VLM 合併結果）
+
+    四種模式：
+      equipment — 設備巡檢（yolo26n detect + VLM，記錄 vhs_score）
+      people    — 人員辨識（yolo26n-pose + VLM，記錄 pose_keypoints）
+      events    — 事件偵測（yolo26n detect + SORT tracking + VLM，記錄 track_history）
+      objects   — 物品辨識（yolo26n detect + VLM，記錄 five_s_score）
+    """
+    __tablename__ = "vision_sessions"
+
+    id:             Mapped[str]            = mapped_column(String(64),   primary_key=True, default=lambda: str(_uuid.uuid4()))
+    mode:           Mapped[str]            = mapped_column(String(32),   nullable=False, index=True)
+    equipment_id:   Mapped[Optional[str]]  = mapped_column(String(64),   nullable=True,  index=True)
+
+    # VLM 分析
+    vlm_prompt:     Mapped[Optional[str]]  = mapped_column(Text,         nullable=True)
+    vlm_result:     Mapped[Optional[str]]  = mapped_column(Text,         nullable=True)
+    risk_level:     Mapped[Optional[str]]  = mapped_column(String(16),   nullable=True)   # critical|elevated|moderate|low
+    vhs_score:      Mapped[Optional[int]]  = mapped_column(Integer,      nullable=True)   # Equipment: 0–100
+    five_s_score:   Mapped[Optional[int]]  = mapped_column(Integer,      nullable=True)   # Objects: 5–25
+
+    # YOLO 偵測
+    yolo_model:     Mapped[str]            = mapped_column(String(64),   default="yolo26n")
+    yolo_task:      Mapped[str]            = mapped_column(String(32),   default="detect")  # detect|pose|track
+    detections:     Mapped[Optional[list]] = mapped_column(JSON,         nullable=True)    # [{classId,label,conf,x,y,w,h,risk,category}]
+    person_count:   Mapped[int]            = mapped_column(Integer,      default=0)
+    vehicle_count:  Mapped[int]            = mapped_column(Integer,      default=0)
+    hazard_count:   Mapped[int]            = mapped_column(Integer,      default=0)
+
+    # 模式專屬資料
+    pose_keypoints: Mapped[Optional[list]] = mapped_column(JSON,         nullable=True)   # People: [{personIdx, keypoints:[{name,x,y,v}×17]}]
+    track_history:  Mapped[Optional[list]] = mapped_column(JSON,         nullable=True)   # Events: [{trackId, classId, label, x,y,w,h, age, hits}]
+    segment_counts: Mapped[Optional[dict]] = mapped_column(JSON,         nullable=True)   # Objects: {className: count}
+
+    # 媒體（縮圖）
+    thumbnail:      Mapped[Optional[str]]  = mapped_column(Text,         nullable=True)   # base64 data URL（≤40KB）
+
+    # 計時
+    duration_ms:    Mapped[Optional[int]]  = mapped_column(Integer,      nullable=True)   # VLM 推論耗時
+
+    created_at:     Mapped[datetime]       = mapped_column(DateTime(timezone=True), default=_now, index=True)

@@ -1,30 +1,34 @@
 ###############################################################################
-# docker-compose.mac.yml — macOS 本機開發環境（完整獨立版）
+# docker-compose.mac.yml — xCloudVLMui Platform [bot-mac 獨立實例]
 #
-# 用法: docker compose -f docker-compose.mac.yml up -d
+# ⚠️  此為 bot-mac 完全獨立部署，與其他實例完全隔離：
+#     - project name : xcloudvlmui-mac
+#     - container 前綴: mac-
+#     - volume 前綴  : mac-
+#     - network      : mac-xcloud-net
 #
-# ⚠️  僅供 macOS 本機開發測試，不適用於 Jetson 生產環境。
+# Port 配置（不與 bot-air030 衝突）：
+#   nginx    → 3110:80   ← 主要入口 (bot-air030 使用 8880)
+#   backend  → 8201:8000 (bot-air030 使用 8001)
+#   frontend → 3200:3000 (bot-air030 使用 3100)
+#   llama-cpp→ 18280:8080(bot-air030 使用 18080)
+#   vlm-webui→ 8290:8090 (bot-air030 使用 8090)
+#   cadvisor → 8291:8080 (bot-air030 使用 8091)
+#   mosquitto→ 內網 (不對外, 由 nginx 代理)
 #
-# 與正式版差異：
-#   - llama-cpp / vlm-webui → traefik/whoami HTTP stub（無 GPU 需求）
-#   - model-init            → busybox exit 0（跳過下載）
-#   - Port 對照：
-#       nginx    → 8880:80  (HTTP + MQTT WebSocket ws://localhost:8880/mqtt)
-#       backend  → 8001:8000
-#       frontend → 3100:3000
-#       cadvisor → 8091:8080
-#       mosquitto→ 不對外暴露（TCP 走內網，WS 走 nginx /mqtt）
-#   - cadvisor 移除 /dev/kmsg（macOS 不存在此裝置）
+# 快速啟動：
+#   docker compose -f docker-compose.mac.yml up -d
 ###############################################################################
 
-name: xcloudvlmui-platform
+name: xcloudvlmui-mac
 
 x-llm-env: &llm-env
-  LLM_BASE_URL:    http://llama-cpp:8080
-  LLM_MODEL:       gemma-4-e4b-it
+  LLM_BASE_URL:    http://host.docker.internal:11434   # 宿主機 Ollama
+  LLM_MODEL:       gemma4:e4b
   LLM_CTX_SIZE:    "131072"
   LLM_MAX_TOKENS:  "4096"
   LLM_TEMPERATURE: "0.1"
+  EMBED_MODEL:     nomic-embed-text                    # 專用 embedding 模型
 
 x-logging: &default-logging
   driver: json-file
@@ -34,89 +38,97 @@ x-logging: &default-logging
 
 services:
 
-  # ── [1] model-init: 跳過下載 ─────────────────────────────────────────
+  # ── [1] model-init: macOS 跳過下載 ─────────────────────────────────
   model-init:
     image: busybox:latest
-    container_name: model-init
-    command: ["sh", "-c", "echo '[dev] skip model download' && exit 0"]
+    container_name: mac-model-init
+    command: ["sh", "-c", "echo '[mac] skip model download' && exit 0"]
     restart: "no"
+    networks:
+      - mac-xcloud-net
 
-  # ── [2] mosquitto ─────────────────────────────────────────────────────
+  # ── [2] mosquitto ──────────────────────────────────────────────────
   mosquitto:
     image: eclipse-mosquitto:2.0
-    container_name: xcloud-mqtt
+    container_name: mac-mqtt
     restart: unless-stopped
-    # 不對外暴露 port：TCP 1883 / WS 9001 均由 nginx 代理
     volumes:
       - ./mosquitto/config/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro
-      - mosquitto-data:/mosquitto/data
-      - mosquitto-log:/mosquitto/log
+      - mac-mosquitto-data:/mosquitto/data
+      - mac-mosquitto-log:/mosquitto/log
     healthcheck:
       test: ["CMD-SHELL", "mosquitto_pub -h localhost -p 1883 -t 'health/ping' -m 'ping' -q 0 2>/dev/null && echo ok || exit 1"]
       interval: 15s
       timeout:  5s
       retries:  3
       start_period: 10s
+    networks:
+      - mac-xcloud-net
     logging: *default-logging
 
-  # ── [3] llama-cpp stub (Jetson 替代) ──────────────────────────────────
+  # ── [3] llama-cpp stub (whoami placeholder) ─────────────────────────
   llama-cpp:
     image: traefik/whoami:latest
-    container_name: llama-cpp
+    container_name: mac-llama-cpp
     restart: unless-stopped
-    command: ["--port=8080"]    # backend LLM_BASE_URL 預期 port 8080
+    command: ["--port=8080"]
     ports:
-      - "18080:8080"
+      - "18280:8080"
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://localhost:8080"]
       interval: 5s
       timeout:  3s
       retries:  5
       start_period: 5s
+    networks:
+      - mac-xcloud-net
     logging: *default-logging
 
-  # ── [4] vlm-webui stub (Jetson 替代) ──────────────────────────────────
+  # ── [4] vlm-webui stub (whoami placeholder) ─────────────────────────
   vlm-webui:
     image: traefik/whoami:latest
-    container_name: vlm-webui
+    container_name: mac-vlm-webui
     restart: unless-stopped
-    command: ["--port=8090"]    # nginx upstream 預期 port 8090
+    command: ["--port=8090"]
     ports:
-      - "8090:8090"
+      - "8290:8090"
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://localhost:8090"]
       interval: 5s
       timeout:  3s
       retries:  5
       start_period: 5s
+    networks:
+      - mac-xcloud-net
     logging: *default-logging
 
-  # ── [5] backend ───────────────────────────────────────────────────────
+  # ── [5] backend ────────────────────────────────────────────────────
   backend:
     build:
       context:    ./backend
       dockerfile: Dockerfile
-    container_name: xcloud-backend
+    image: xcloudvlmui-mac-backend:latest
+    container_name: mac-backend
     restart: unless-stopped
     environment:
       <<: *llm-env
-      APP_NAME:           "xCloudVLMui Platform [DEV]"
-      VLM_WEBUI_URL:      http://vlm-webui:80
+      APP_NAME:           "xCloudVLMui Platform [bot-mac]"
+      VLM_WEBUI_URL:      http://vlm-webui:8090   # service name
       DATABASE_URL:       sqlite+aiosqlite:////data/xcloudvlm.db
       CHROMA_PERSIST_DIR: /data/chroma
-      ALLOWED_ORIGINS:    '["http://localhost:3100","http://localhost:8880","http://localhost","http://air-030"]'
-      DEBUG:              "true"
-      MQTT_BROKER_HOST:   mosquitto
+      ALLOWED_ORIGINS:    '["http://localhost:3200","http://localhost:3110","http://localhost"]'
+      DEBUG:              "false"
+      MQTT_BROKER_HOST:   mosquitto             # service name
       MQTT_BROKER_PORT:   "1883"
       MQTT_ENABLED:       "true"
     env_file:
       - path: ./backend/.env
         required: false
     volumes:
-      - backend-data:/data
+      - mac-backend-data:/data
       - ./backend/uploads:/app/uploads
     ports:
-      - "8001:8000"
+      - "8201:8000"
     depends_on:
       llama-cpp:
         condition: service_started
@@ -128,43 +140,50 @@ services:
       timeout:  10s
       retries:  5
       start_period: 30s
+    networks:
+      - mac-xcloud-net
     logging: *default-logging
 
-  # ── [6] frontend ──────────────────────────────────────────────────────
+  # ── [6] frontend ───────────────────────────────────────────────────
   frontend:
     build:
       context:    ./frontend
       dockerfile: Dockerfile
-    container_name: xcloud-frontend
+    image: xcloudvlmui-mac-frontend:latest
+    container_name: mac-frontend
     restart: unless-stopped
     environment:
-      - NEXTAUTH_URL=http://localhost:8880
-      - NEXT_PUBLIC_API_URL=http://backend:8000
-      - NEXT_PUBLIC_VLM_WEBUI_URL=http://localhost:8880/vlm
+      - NEXTAUTH_URL=http://localhost:3110
+      - NEXT_PUBLIC_API_URL=http://localhost:3110    # 瀏覽器透過 Nginx (port 3110) 存取
+      # NEXT_PUBLIC_WS_URL 留空 → 由 camera-stream.tsx 從 window.location 自動推導
+      # 若直連後端開發（無 Nginx），設為：ws://localhost:8201
+      - NEXT_PUBLIC_WS_URL=
       - NODE_ENV=production
     env_file:
       - path: ./frontend/.env.local
         required: false
     ports:
-      - "3100:3000"
+      - "3200:3000"
     depends_on:
       backend:
         condition: service_healthy
     healthcheck:
-      test: ["CMD", "curl", "-sf", "http://localhost:3000"]
+      test: ["CMD", "wget", "-qO-", "http://localhost:3000"]
       interval: 20s
       timeout:  10s
       retries:  5
       start_period: 15s
+    networks:
+      - mac-xcloud-net
     logging: *default-logging
 
-  # ── [7] nginx ─────────────────────────────────────────────────────────
+  # ── [7] nginx ──────────────────────────────────────────────────────
   nginx:
     image: nginx:1.25-alpine
-    container_name: xcloud-nginx
+    container_name: mac-nginx
     restart: unless-stopped
     ports:
-      - "8880:80"      # HTTP（前端 + API + MQTT WebSocket /mqtt）
+      - "3110:80"
     volumes:
       - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
     depends_on:
@@ -176,16 +195,18 @@ services:
       timeout:  5s
       retries:  3
       start_period: 15s
+    networks:
+      - mac-xcloud-net
     logging: *default-logging
 
-  # ── [8] cadvisor ──────────────────────────────────────────────────────
+  # ── [8] cadvisor ───────────────────────────────────────────────────
   cadvisor:
     image: gcr.io/cadvisor/cadvisor:v0.49.1
-    container_name: xcloud-cadvisor
+    container_name: mac-cadvisor
     restart: unless-stopped
     privileged: true
     ports:
-      - "8091:8080"
+      - "8291:8080"
     volumes:
       - /:/rootfs:ro
       - /var/run:/var/run:ro
@@ -204,19 +225,21 @@ services:
       timeout:  5s
       retries:  3
       start_period: 10s
+    networks:
+      - mac-xcloud-net
     logging: *default-logging
 
-# ── Named Volumes ──────────────────────────────────────────────────────
+# ── Named Volumes（獨立於 bot-air030）──────────────────────────────────
 volumes:
-  model-data:
+  mac-backend-data:
     driver: local
-  backend-data:
+  mac-mosquitto-data:
     driver: local
-  mosquitto-data:
-    driver: local
-  mosquitto-log:
+  mac-mosquitto-log:
     driver: local
 
+# ── Network（獨立隔離）─────────────────────────────────────────────────
 networks:
-  default:
-    name: xcloud-net
+  mac-xcloud-net:
+    name: mac-xcloud-net
+    driver: bridge

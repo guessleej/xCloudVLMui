@@ -82,10 +82,13 @@ export interface Report {
 }
 
 export interface VlmSessionCapture {
-  session_id:    string;
-  source:        string;
-  captured_at:   string;
-  raw_vlm_json?: Record<string, unknown>;
+  session_id:        string;
+  source:            string;
+  captured_at:       string;
+  title?:            string;
+  risk_level?:       string;
+  markdown_content?: string;
+  raw_vlm_json?:     Record<string, unknown>;
 }
 
 // ── RAG ──────────────────────────────────────────────────────────────
