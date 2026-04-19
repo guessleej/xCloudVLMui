@@ -675,7 +675,7 @@ export default function ModelsPage() {
     total:   models.length,
     active:  models.filter((m) => m.is_active).length,
     custom:  models.filter((m) => !m.is_builtin).length,
-    tasks:   [...new Set(models.map((m) => m.task_type))].length,
+    tasks:   Array.from(new Set(models.map((m) => m.task_type))).length,
   };
 
   /* ── 按 task_type 分組（過濾後）── */
