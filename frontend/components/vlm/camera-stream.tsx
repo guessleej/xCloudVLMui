@@ -1803,7 +1803,7 @@ export default function CameraStream({
           style={{ zIndex: 20, opacity: showOverlay && detectedObjects.length > 0 ? 1 : 0 }}
         />
 
-        {/* 偵測框數量角標 */}
+        {/* 偵測框數量角標（右下） */}
         {showOverlay && detectedObjects.length > 0 && !isAnalyzing && (
           <div className="absolute right-3 bottom-20 z-20 flex items-center gap-1.5 rounded-full border border-white/10 bg-slate-950/80 px-2.5 py-1 backdrop-blur-sm">
             <span className="h-1.5 w-1.5 rounded-full bg-emerald-400" />
@@ -1822,6 +1822,92 @@ export default function CameraStream({
             >✕</button>
           </div>
         )}
+
+        {/* ── YOLO 即時偵測警示列（畫面正下方中央，最高清晰度）────── */}
+        {isCameraOn && (() => {
+          const critical = yoloDetections.filter((d) => d.risk === "critical");
+          const warning  = yoloDetections.filter((d) => d.risk === "warning");
+          const allItems = [...critical, ...warning];
+          if (allItems.length === 0) return null;
+          const hasCrit = critical.length > 0;
+
+          // 依類別合併同名物件（取最高 conf）
+          const merged: { name: string; nameEn: string; count: number; maxConf: number; risk: string }[] = [];
+          for (const d of allItems) {
+            const ex = merged.find((m) => m.name === d.className);
+            if (ex) { ex.count++; ex.maxConf = Math.max(ex.maxConf, d.confidence); }
+            else     { merged.push({ name: d.className, nameEn: d.classEn ?? "", count: 1, maxConf: d.confidence, risk: d.risk }); }
+          }
+
+          return (
+            <div className="absolute bottom-[68px] left-1/2 z-30 -translate-x-1/2 pointer-events-none">
+              <div className={`
+                flex items-center gap-2.5 rounded-2xl border px-4 py-2.5
+                backdrop-blur-xl shadow-2xl
+                ${hasCrit
+                  ? "border-red-500/70 bg-red-950/88 shadow-red-500/30"
+                  : "border-amber-500/60 bg-amber-950/85 shadow-amber-500/20"
+                }
+              `}>
+                {/* 風險等級大標 */}
+                <div className={`flex items-center gap-1.5 ${hasCrit ? "text-red-300" : "text-amber-300"}`}>
+                  <span className={`text-lg font-black ${hasCrit ? "animate-pulse" : ""}`}>⚠</span>
+                  <span className="text-sm font-extrabold tracking-widest uppercase">
+                    {hasCrit ? "高危" : "警告"}
+                  </span>
+                </div>
+
+                {/* 分隔線 */}
+                <div className="h-5 w-px bg-white/20" />
+
+                {/* 偵測物件清單 */}
+                <div className="flex items-center gap-1.5">
+                  {merged.slice(0, 5).map((item, i) => (
+                    <div
+                      key={i}
+                      className={`
+                        flex items-center gap-1.5 rounded-xl border px-3 py-1
+                        ${item.risk === "critical"
+                          ? "border-red-400/50 bg-red-500/25 text-red-100"
+                          : "border-amber-400/40 bg-amber-500/20 text-amber-100"
+                        }
+                      `}
+                    >
+                      {/* 類別名稱 */}
+                      <span className="text-sm font-bold">{item.name}</span>
+                      {item.count > 1 && (
+                        <span className={`rounded-full px-1.5 py-0.5 text-[10px] font-bold
+                          ${item.risk === "critical" ? "bg-red-500/30 text-red-200" : "bg-amber-500/25 text-amber-200"}`}>
+                          ×{item.count}
+                        </span>
+                      )}
+                      {/* 信心度 */}
+                      <span className="text-sm font-semibold opacity-90">
+                        {Math.round(item.maxConf * 100)}%
+                      </span>
+                    </div>
+                  ))}
+                  {merged.length > 5 && (
+                    <span className="text-xs text-white/50">+{merged.length - 5}</span>
+                  )}
+                </div>
+
+                {/* 若有人員偵測也提示骨架已啟動 */}
+                {(() => {
+                  const personCount = yoloDetections.filter((d) => d.category === "personnel").length;
+                  return personCount > 0 ? (
+                    <>
+                      <div className="h-5 w-px bg-white/20" />
+                      <span className="text-[10px] text-violet-300 font-semibold">
+                        骨架 ×{personCount}
+                      </span>
+                    </>
+                  ) : null;
+                })()}
+              </div>
+            </div>
+          );
+        })()}
 
         {/* 未開啟攝影機時的佔位畫面 */}
         {!isCameraOn && (

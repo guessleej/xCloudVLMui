@@ -34,6 +34,7 @@ from routers import (
     rag,           # backward-compat shim（/api/rag/*）
     vision as vision_router,
     models as models_router,
+    events as events_router,
 )
 from middleware.syslog_middleware import SyslogMiddleware
 from models.schemas import HealthResponse
@@ -197,6 +198,7 @@ app.include_router(mqtt_router.router)
 app.include_router(syslog_router.router)
 app.include_router(vision_router.router)   # /api/vision
 app.include_router(models_router.router)   # /api/models
+app.include_router(events_router.router)   # /api/events
 
 # ── Health Check ──────────────────────────────────────────────────────
 @app.get("/api/health", response_model=HealthResponse, tags=["system"])

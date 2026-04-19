@@ -5,30 +5,9 @@
     "next/core-web-vitals"
   ],
 
-  "plugins": [
-    "@typescript-eslint"
-  ],
-
   "rules": {
 
-    // ── TypeScript ─────────────────────────────────────────────────
-
-    "@typescript-eslint/no-unused-vars": [
-      "error",
-      {
-        "vars":               "all",
-        "args":               "after-used",
-        "ignoreRestSiblings": true,
-        "argsIgnorePattern":  "^_",
-        "varsIgnorePattern":  "^_"
-      }
-    ],
-    "@typescript-eslint/no-explicit-any":     "warn",
-    "@typescript-eslint/no-empty-object-type":"warn",
-    "@typescript-eslint/consistent-type-imports": [
-      "error",
-      { "prefer": "type-imports", "fixStyle": "inline-type-imports" }
-    ],
+    // ── TypeScript (via next/core-web-vitals built-in) ─────────────
 
     // ── React ──────────────────────────────────────────────────────
 
