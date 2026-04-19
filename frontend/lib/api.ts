@@ -130,6 +130,31 @@ export const chatHistoryApi = {
     apiClient.delete("/api/chat/history", { params: sessionId ? { session_id: sessionId } : {} }),
 };
 
+// ── Model Registry ─────────────────────────────────────────────────
+export const modelsApi = {
+  /** 列出所有模型 */
+  list: (params?: { task_type?: string; is_active?: boolean }) =>
+    apiClient.get("/api/models", { params }),
+  /** 取得各任務當前啟用模型 */
+  getActive: () =>
+    apiClient.get("/api/models/active"),
+  /** 取得單一模型 */
+  get: (id: string) =>
+    apiClient.get(`/api/models/${id}`),
+  /** 新增模型 */
+  create: (payload: Record<string, unknown>) =>
+    apiClient.post("/api/models", payload),
+  /** 修改模型 */
+  update: (id: string, payload: Record<string, unknown>) =>
+    apiClient.patch(`/api/models/${id}`, payload),
+  /** 刪除模型 */
+  delete: (id: string) =>
+    apiClient.delete(`/api/models/${id}`),
+  /** 啟用模型（同時停用同類型其他模型）*/
+  activate: (id: string) =>
+    apiClient.post(`/api/models/${id}/activate`),
+};
+
 // ── VLM ────────────────────────────────────────────────────────────
 export const vlmApi = {
   /** 檢查 llama.cpp 推論引擎狀態 */

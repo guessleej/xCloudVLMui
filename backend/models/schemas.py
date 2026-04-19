@@ -513,3 +513,72 @@ class ChatHistoryUpdate(BaseModel):
 class ChatHistoryListResponse(BaseModel):
     total:  int
     items:  list[ChatHistoryOut]
+
+
+# ── Trained Model ─────────────────────────────────────────────────────
+
+class TrainedModelCreate(BaseModel):
+    name:             str
+    description:      Optional[str]          = None
+    task_type:        str                     # detect|pose|segment|classify|obb
+    model_filename:   str
+    model_size_mb:    Optional[float]         = None
+    model_format:     str                     = "e2e"
+    output_shape:     Optional[str]           = None
+    input_size:       int                     = 640
+    num_classes:      int                     = 80
+    class_names:      Optional[list[str]]     = None
+    dataset_name:     Optional[str]           = None
+    is_active:        bool                    = False
+    source:           str                     = "custom"
+    base_model:       Optional[str]           = None
+    metrics:          Optional[dict]          = None
+    notes:            Optional[str]           = None
+
+class TrainedModelUpdate(BaseModel):
+    name:             Optional[str]           = None
+    description:      Optional[str]           = None
+    model_filename:   Optional[str]           = None
+    model_size_mb:    Optional[float]         = None
+    model_format:     Optional[str]           = None
+    output_shape:     Optional[str]           = None
+    input_size:       Optional[int]           = None
+    num_classes:      Optional[int]           = None
+    class_names:      Optional[list[str]]     = None
+    dataset_name:     Optional[str]           = None
+    is_active:        Optional[bool]          = None
+    source:           Optional[str]           = None
+    base_model:       Optional[str]           = None
+    metrics:          Optional[dict]          = None
+    notes:            Optional[str]           = None
+
+class TrainedModelOut(BaseModel):
+    id:               str
+    name:             str
+    description:      Optional[str]   = None
+    task_type:        str
+    model_filename:   str
+    model_size_mb:    Optional[float] = None
+    model_format:     str
+    output_shape:     Optional[str]   = None
+    input_size:       int
+    num_classes:      int
+    class_names:      Optional[list]  = None
+    dataset_name:     Optional[str]   = None
+    is_active:        bool
+    is_builtin:       bool
+    source:           str
+    base_model:       Optional[str]   = None
+    metrics:          Optional[dict]  = None
+    notes:            Optional[str]   = None
+    created_at:       datetime
+    updated_at:       datetime
+    model_config = {"from_attributes": True}
+
+class TrainedModelListResponse(BaseModel):
+    total:  int
+    items:  list[TrainedModelOut]
+
+class ActiveModelsResponse(BaseModel):
+    """各 task_type 目前啟用的模型映射"""
+    models: dict[str, TrainedModelOut]   # {"detect": ..., "pose": ...}

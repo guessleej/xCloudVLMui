@@ -252,6 +252,42 @@ export interface PipelineStatus {
   checked_at: string;
 }
 
+// ── Trained Model ────────────────────────────────────────────────────
+export type YoloTaskType = "detect" | "pose" | "segment" | "classify" | "obb";
+export type ModelFormat  = "e2e" | "traditional";
+
+export interface TrainedModel {
+  id:               string;
+  name:             string;
+  description?:     string;
+  task_type:        YoloTaskType;
+  model_filename:   string;
+  model_size_mb?:   number;
+  model_format:     ModelFormat;
+  output_shape?:    string;
+  input_size:       number;
+  num_classes:      number;
+  class_names?:     string[];
+  dataset_name?:    string;
+  is_active:        boolean;
+  is_builtin:       boolean;
+  source:           string;
+  base_model?:      string;
+  metrics?:         Record<string, number>;
+  notes?:           string;
+  created_at:       string;
+  updated_at:       string;
+}
+
+export interface TrainedModelListResponse {
+  total: number;
+  items: TrainedModel[];
+}
+
+export interface ActiveModelsResponse {
+  models: Record<YoloTaskType, TrainedModel>;
+}
+
 // ── Chat History ─────────────────────────────────────────────────────
 export interface ChatHistoryItem {
   id:          string;

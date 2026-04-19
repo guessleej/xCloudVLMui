@@ -24,6 +24,7 @@ import {
   ChevronDown,
   ChevronUp,
   Clock,
+  Cpu,
   History,
   Loader2,
   MapPin,
@@ -42,10 +43,11 @@ import {
   ZoomIn,
 } from "lucide-react";
 import toast from "react-hot-toast";
-import { vlmApi, getVlmWsUrl } from "@/lib/api";
+import { vlmApi, getVlmWsUrl, modelsApi } from "@/lib/api";
 import { useYolo, type YoloDetection, calcManufacturingStats } from "@/hooks/useYolo";
 import { useYoloPose, type PoseDetection, drawPoseOverlay, poseToDbFormat } from "@/hooks/useYoloPose";
 import { SortTracker, type TrackedObject, drawTrackIds } from "@/lib/yoloTracker";
+import type { TrainedModel } from "@/types";
 
 /* ═══════════════════════════════════════════════════════════════════════════
    型別定義
@@ -278,8 +280,50 @@ COMPLIANCE 存放合規評估：
   },
 ];
 
-const DEFAULT_MODE_KEY = "equipment";
-const DEFAULT_PROMPT = RECOGNITION_MODES[0].prompt;
+  // ── AUTO 統一全模式（合併四種模式）──
+  {
+    key:     "auto",
+    label:   "統一全模式",
+    labelEn: "AUTO",
+    icon:    <Cpu className="h-3.5 w-3.5" />,
+    color:   "rose",
+    prompt: `你是資深工廠視覺 AI 分析師，同時具備設備診斷、工安合規、事件識別與物料管理四項專業能力。
+請對影像執行**全面統一分析**，涵蓋所有可見元素：設備、人員、事件、物品。
+
+【全域偵測清單】每個可見元素各佔一行（必須先輸出此區塊）：
+DETECT: [名稱/描述] | POS: [left/center/right] | VERT: [top/middle/bottom] | STATUS: [ok/warning/critical] | CONF: [high/medium/low] | CATEGORY: [equipment/person/event/object/hazard/environment]
+
+CATEGORY 分類：
+  equipment   = 機械/電氣/管路/結構等工業設備元件
+  person      = 作業人員（含 PPE 狀態）
+  event       = 正在發生的事件或異常活動
+  object      = 物料/工具/成品/廢料等可識別物品
+  hazard      = 危害源（危險物品/暴露能量/不安全狀態）
+  environment = 場景/環境元素（地板/照明/通道/空間）
+
+【設備健康評分】（若影像含設備則必須輸出）：
+VHS: [0–100整數] | REASON: [主要扣分因素，不超過20字]
+
+【5S 評分】（若影像含工作場所則必須輸出）：
+5S: 整理=[1-5] | 整頓=[1-5] | 清掃=[1-5] | 清潔=[1-5] | 素養=[1-5] | 總分=[5-25] | 等級=[優/良/中/差]
+
+【環境安全評估】（必須輸出此行）：
+ENV: [場景類型] | LIGHT: [good/poor/hazard] | FLOOR: [clear/wet/cluttered/hazard] | RISK: [low/medium/high/critical] | ACTIVITY: [正在進行的活動] | COUNT: [人數]
+
+【風險矩陣評估】（必須輸出此行）：
+RISK_MATRIX: 發生可能性=[很低/低/中/高/很高] | 影響嚴重度=[輕微/中等/嚴重/極嚴重/災難性] | 風險等級=[可接受/需監控/不可接受/禁止作業]
+
+【全面診斷摘要】4–6 句，依序包含：
+1. 最高風險項目（設備故障/人員安全/事件/危害物品）
+2. PPE 合規狀態（若有人員）
+3. 環境危害因子與 5S 主要缺失
+4. 立即處置建議（按優先順序）
+5. 預防性維護與系統改善建議`,
+  },
+];
+
+const DEFAULT_MODE_KEY = "auto";
+const DEFAULT_PROMPT = RECOGNITION_MODES.find((m) => m.key === "auto")!.prompt;
 
 const FRAME_JPEG_QUALITY = 0.75;
 const MAX_HISTORY = 20;
@@ -913,6 +957,21 @@ export default function CameraStream({
   const [activeMode,        setActiveMode]        = useState<string>(DEFAULT_MODE_KEY);
   const activeModeRef       = useRef<string>(DEFAULT_MODE_KEY);
 
+  /* ── 模型登錄（動態載入啟用的 ONNX 模型）────────────────────────── */
+  const [activeModels,      setActiveModels]      = useState<Record<string, TrainedModel>>({});
+  const [modelsLoading,     setModelsLoading]     = useState(false);
+
+  /* ── 從模型登錄載入啟用的模型 ──────────────────────────────────── */
+  useEffect(() => {
+    let cancelled = false;
+    setModelsLoading(true);
+    modelsApi.getActive()
+      .then((res) => { if (!cancelled) setActiveModels(res.data.models ?? {}); })
+      .catch(() => { /* 模型登錄不可用時靜默降級 */ })
+      .finally(() => { if (!cancelled) setModelsLoading(false); });
+    return () => { cancelled = true; };
+  }, []);
+
   /* ── Prompt ───────────────────────────────────────────────────────── */
   const [prompt,            setPrompt]            = useState(DEFAULT_PROMPT);
   const promptRef           = useRef(DEFAULT_PROMPT);
@@ -940,11 +999,14 @@ export default function CameraStream({
       const vhsScore   = parseVhsScore(entry.result);
       const fiveSScore = parseFiveSScore(entry.result);
 
-      const yoloModel = mode === "people" ? "yolo26n-pose" : "yolo26n";
-      const yoloTask  = mode === "people" ? "pose" : mode === "events" ? "track" : "detect";
+      const yoloModel = (mode === "people" || mode === "auto") ? "yolo26n-pose" : "yolo26n";
+      const yoloTask  = mode === "people" ? "pose"
+                      : mode === "events" ? "track"
+                      : mode === "auto"   ? "unified"
+                      : "detect";
 
-      const poseKps = mode === "people" ? poseToDbFormat(poseDetectionsRef.current) : undefined;
-      const tracks  = mode === "events" ? sortTrackerRef.current.getSnapshot()       : undefined;
+      const poseKps = (mode === "people" || mode === "auto") ? poseToDbFormat(poseDetectionsRef.current) : undefined;
+      const tracks  = (mode === "events" || mode === "auto") ? sortTrackerRef.current.getSnapshot()      : undefined;
 
       const detPayload = dets.map((d) => ({
         class_id:   d.classId,
@@ -1388,7 +1450,8 @@ export default function CameraStream({
   ───────────────────────────────────────────────────────────────────── */
   useEffect(() => {
     // 關閉 YOLO 或攝影機未開啟時清空畫布並結束循環
-    if (!yoloEnabled || !isCameraOn || yolo.status !== "ready") {
+    const needsReady = isAutoMode ? (yolo.status !== "ready") : (activeMode === "people" ? false : yolo.status !== "ready");
+    if (!yoloEnabled || !isCameraOn || needsReady) {
       if (yoloRafRef.current) cancelAnimationFrame(yoloRafRef.current);
       yoloRafRef.current = null;
       setYoloDetections([]);
@@ -1421,7 +1484,6 @@ export default function CameraStream({
         // People 模式：使用 pose 模型（17 關鍵點）
         yoloPose.detect(video).then((poses) => {
           poseDetectionsRef.current = poses;
-          // 同步更新 yoloDetections（用 bbox 模擬，供 stats 計算）
           const fakeDets: YoloDetection[] = poses.map((p) => ({
             classId: 0, className: "人員", classEn: "person",
             confidence: p.confidence,
@@ -1439,6 +1501,47 @@ export default function CameraStream({
             yoloFpsCountRef.current = { count: 0, ts: now };
           }
         });
+
+      } else if (mode === "auto" && yolo.status === "ready" && yoloPose.status === "ready") {
+        // AUTO 統一全模式：detect + pose 同時執行，結果合併顯示
+        Promise.all([
+          yolo.detect(video),
+          yoloPose.detect(video),
+        ]).then(([dets, poses]) => {
+          yoloDetectionsRef.current = dets;
+          poseDetectionsRef.current = poses;
+
+          // SORT 追蹤（非人員物件）
+          const tracked = sortTrackerRef.current.update(
+            dets.filter((d) => d.category !== "personnel")
+          );
+          setYoloDetections(dets);
+
+          // 清空並重繪：先畫 detect 框，再疊 pose 骨架，再疊 trackId
+          const rect = video.getBoundingClientRect();
+          canvas.width  = rect.width  || video.videoWidth;
+          canvas.height = rect.height || video.videoHeight;
+          const ctx2d = canvas.getContext("2d");
+          if (ctx2d) {
+            ctx2d.clearRect(0, 0, canvas.width, canvas.height);
+            // 1. YOLO detect 框（非人員）
+            const nonPersonDets = dets.filter((d) => d.category !== "personnel");
+            drawYoloOverlay(canvas, video, nonPersonDets);
+            // 2. Pose 骨架（人員）
+            drawPoseOverlay(canvas as HTMLCanvasElement, video, poses);
+            // 3. Track ID 標籤
+            drawTrackIds(ctx2d, tracked as TrackedObject[], canvas.width, canvas.height);
+          }
+
+          const now = performance.now();
+          yoloFpsCountRef.current.count++;
+          if (now - yoloFpsCountRef.current.ts >= 1000) {
+            setYoloFps(yoloFpsCountRef.current.count);
+            setYoloInferMs(Math.round(now - t0));
+            yoloFpsCountRef.current = { count: 0, ts: now };
+          }
+        });
+
       } else {
         // Equipment / Events / Objects：使用偵測模型
         yolo.detect(video).then((dets) => {
@@ -1481,16 +1584,16 @@ export default function CameraStream({
   ───────────────────────────────────────────────────────────────────── */
   useEffect(() => {
     if (!yoloEnabled) return;
-    if (activeMode === "people") {
-      // People 模式：載入姿態模型
-      if (yoloPose.status === "idle" || yoloPose.status === "error") {
-        yoloPose.loadModel();
-      }
+    if (activeMode === "auto") {
+      // AUTO 統一全模式：detect + pose 同時載入
+      if (yolo.status === "idle" || yolo.status === "error") yolo.loadModel();
+      if (yoloPose.status === "idle" || yoloPose.status === "error") yoloPose.loadModel();
+    } else if (activeMode === "people") {
+      // People 模式：只載入姿態模型
+      if (yoloPose.status === "idle" || yoloPose.status === "error") yoloPose.loadModel();
     } else {
-      // 其他模式：載入偵測模型
-      if (yolo.status === "idle") {
-        yolo.loadModel();
-      }
+      // Equipment / Events / Objects：只載入偵測模型
+      if (yolo.status === "idle" || yolo.status === "error") yolo.loadModel();
     }
   }, [yoloEnabled, activeMode, yolo.status, yoloPose.status, yolo.loadModel, yoloPose.loadModel]);
 
@@ -1516,8 +1619,13 @@ export default function CameraStream({
 
   const canAnalyze    = isCameraOn && !isAnalyzing;
   const isPeopleMode  = activeMode === "people";
-  const isYoloLoading = yolo.status === "loading";
-  const isYoloReady   = yolo.status === "ready";
+  const isAutoMode    = activeMode === "auto";
+  const isYoloLoading = yolo.status === "loading" || (isAutoMode && yoloPose.status === "loading");
+  const isYoloReady   = isAutoMode
+    ? (yolo.status === "ready" && yoloPose.status === "ready")
+    : isPeopleMode
+      ? yoloPose.status === "ready"
+      : yolo.status === "ready";
 
   /* ═══════════════════════════════════════════════════════════════════════
      Render
@@ -1535,6 +1643,7 @@ export default function CameraStream({
             emerald: isActive ? "border-emerald-500/50 bg-emerald-500/15 text-emerald-200" : "border-white/8 bg-white/[0.03] text-slate-400 hover:bg-white/[0.06]",
             amber:   isActive ? "border-amber-500/50 bg-amber-500/15 text-amber-200"       : "border-white/8 bg-white/[0.03] text-slate-400 hover:bg-white/[0.06]",
             violet:  isActive ? "border-violet-500/50 bg-violet-500/15 text-violet-200"    : "border-white/8 bg-white/[0.03] text-slate-400 hover:bg-white/[0.06]",
+            rose:    isActive ? "border-rose-500/60 bg-rose-500/20 text-rose-200 ring-1 ring-rose-500/30" : "border-white/8 bg-white/[0.03] text-slate-400 hover:bg-white/[0.06]",
           };
           return (
             <button

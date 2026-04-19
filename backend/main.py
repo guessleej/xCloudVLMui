@@ -33,6 +33,7 @@ from routers import (
     feature_flags as feature_flags_router,
     rag,           # backward-compat shim（/api/rag/*）
     vision as vision_router,
+    models as models_router,
 )
 from middleware.syslog_middleware import SyslogMiddleware
 from models.schemas import HealthResponse
@@ -70,6 +71,16 @@ async def lifespan(app: FastAPI):
             logger.info("DB settings loaded and applied: %s", list(_db_settings.keys()))
     except Exception as _e:
         logger.warning("Could not load DB settings on startup: %s", _e)
+
+    # ── 啟動時植入預設 YOLO 模型種子資料 ──────────────────────────────
+    try:
+        from sqlalchemy.ext.asyncio import AsyncSession as _AS2
+        from database import engine as _async_engine2
+        from routers.models import seed_default_models
+        async with _AS2(_async_engine2) as _mdb:
+            await seed_default_models(_mdb)
+    except Exception as _me:
+        logger.warning("Could not seed default models: %s", _me)
 
     logger.info("ChromaDB ready: %s", settings.chroma_persist_dir)
     logger.info("LLM endpoint: %s", settings.llm_base_url)
@@ -185,6 +196,7 @@ app.include_router(settings_router.router)
 app.include_router(mqtt_router.router)
 app.include_router(syslog_router.router)
 app.include_router(vision_router.router)   # /api/vision
+app.include_router(models_router.router)   # /api/models
 
 # ── Health Check ──────────────────────────────────────────────────────
 @app.get("/api/health", response_model=HealthResponse, tags=["system"])
