@@ -22,27 +22,8 @@
     "@next/next/no-html-link-for-pages": "error",
     "@next/next/no-img-element":          "warn",
 
-    // ── Import 排序 ────────────────────────────────────────────────
-
-    "import/order": [
-      "error",
-      {
-        "groups": [
-          "builtin",
-          "external",
-          ["internal", "parent", "sibling", "index"],
-          "type"
-        ],
-        "pathGroups": [
-          { "pattern": "react",    "group": "external", "position": "before" },
-          { "pattern": "next/**",  "group": "external", "position": "before" },
-          { "pattern": "@/**",     "group": "internal" }
-        ],
-        "pathGroupsExcludedImportTypes": ["react"],
-        "newlines-between": "always",
-        "alphabetize": { "order": "asc", "caseInsensitive": true }
-      }
-    ],
+    // ── Import 排序（關閉：允許 AI 生成代碼不強制 import 順序）─────
+    "import/order":         "off",
 
     // ── 一般 JS ────────────────────────────────────────────────────
 
@@ -51,7 +32,7 @@
       { "allow": ["warn", "error"] }
     ],
     "no-debugger":          "error",
-    "no-duplicate-imports": "error",
+    "no-duplicate-imports": "off",
     "prefer-const":         "error",
     "eqeqeq":              ["error", "always"],
     "curly":               ["error", "multi-line"],
