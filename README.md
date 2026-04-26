@@ -20,19 +20,18 @@
 
 ## 支援硬體平台
 
-每個 branch 為獨立部署，擁有各自的 project name、container 前綴與 port，互不干涉。
+**每種設備硬體核心不同，各自維護獨立 repo**，確保套件安裝、驅動相依與 Docker 設定完全隔離，互不干涉。
 
-| Branch | 硬體 | Project Name | 前綴 | 架構 | Port 入口 |
-|--------|------|-------------|------|------|-----------|
-| [`main`](../../tree/main) | 通用基底 | `xcloudvlmui-platform` | 無 | 共用 | — |
-| [`bot-dgx-spark`](../../tree/bot-dgx-spark) | NVIDIA DGX Spark | `xcloudvlmui-dgx-spark` | `dgx-spark-` | ARM64 | `:8780` |
-| [`bot-mic743`](../../tree/bot-mic743) | Advantech MIC-743 | `xcloudvlmui-mic743` | `mic743-` | ARM64 | `:8780` |
-| [`bot-air030`](../../tree/bot-air030) | Advantech AIR-030 | `xcloudvlmui-air030` | `air030-` | ARM64 | `:8780` |
-| [`bot-x86`](../../tree/bot-x86) | x86-64 Linux | `xcloudvlmui-x86` | `x86-` | AMD64 | `:8680` |
-| [`bot-mac`](../../tree/bot-mac) | Apple Silicon Mac | `xcloudvlmui-mac` | `mac-` | ARM64 | `:8880` |
+> ⚠️ 部署前請確認設備型號，clone **對應設備的專屬 repo**，勿混用。
 
-> **部署規則**：每台設備 checkout 對應 branch，互不干涉。  
-> `xCloudVLMui-dgx` 為獨立 repo，供正式 DGX Spark 生產環境使用。
+| 設備 Repo | 硬體 | Project Name | 前綴 | 架構 | Port 入口 |
+|-----------|------|-------------|------|------|-----------|
+| [`xCloudVLMui`](https://github.com/guessleej/xCloudVLMui) | 通用基底（本 repo） | `xcloudvlmui-platform` | 無 | 共用 | — |
+| [`xCloudVLMui-dgx-spark`](https://github.com/guessleej/xCloudVLMui-dgx-spark) | NVIDIA DGX Spark | `xcloudvlmui-dgx-spark` | `dgx-spark-` | ARM64 | `:8780` |
+| [`xCloudVLMui-mic743`](https://github.com/guessleej/xCloudVLMui-mic743) | Advantech MIC-743 | `xcloudvlmui-mic743` | `mic743-` | ARM64 | `:8780` |
+| [`xCloudVLMui-air030`](https://github.com/guessleej/xCloudVLMui-air030) | Advantech AIR-030 | `xcloudvlmui-air030` | `air030-` | ARM64 | `:8780` |
+| [`xCloudVLMui-x86`](https://github.com/guessleej/xCloudVLMui-x86) | x86-64 Linux | `xcloudvlmui-x86` | `x86-` | AMD64 | `:8680` |
+| [`xCloudVLMui-mac`](https://github.com/guessleej/xCloudVLMui-mac) | Apple Silicon Mac | `xcloudvlmui-mac` | `mac-` | ARM64 | `:8880` |
 
 ---
 
@@ -79,23 +78,36 @@
 
 ## 快速啟動
 
-```bash
-# 1. clone 並選擇對應硬體的 branch
-git clone https://github.com/guessleej/xCloudVLMui.git
-cd xCloudVLMui
-git checkout bot-mac        # Apple Silicon Mac
-# git checkout bot-x86      # x86-64 Linux
-# git checkout bot-mic743   # Advantech MIC-743
-# git checkout bot-air030   # Advantech AIR-030
-# git checkout bot-dgx-spark # NVIDIA DGX Spark
+> ⚠️ 請 clone **對應你設備型號的 repo**，不同硬體的套件與驅動設定不可混用。
 
-# 2. 設定環境變數
+```bash
+# ── 依設備型號選擇對應 repo ──────────────────────────────────────
+
+# NVIDIA DGX Spark
+git clone https://github.com/guessleej/xCloudVLMui-dgx-spark.git
+
+# Advantech MIC-743
+git clone https://github.com/guessleej/xCloudVLMui-mic743.git
+
+# Advantech AIR-030
+git clone https://github.com/guessleej/xCloudVLMui-air030.git
+
+# x86-64 Linux
+git clone https://github.com/guessleej/xCloudVLMui-x86.git
+
+# Apple Silicon Mac
+git clone https://github.com/guessleej/xCloudVLMui-mac.git
+
+# ── 啟動流程（各 repo 相同）──────────────────────────────────────
+cd xCloudVLMui-<設備名稱>
+
+# 1. 設定環境變數
 make setup
 
-# 3. 啟動服務
+# 2. 啟動服務
 make up
 
-# 4. 驗證
+# 3. 驗證
 make test
 ```
 
