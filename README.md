@@ -22,14 +22,14 @@
 
 每個 branch 為獨立部署，擁有各自的 project name、container 前綴與 port，互不干涉。
 
-| Branch | 硬體平台 | 架構 | Project Name | Port 入口 |
-|--------|---------|------|-------------|-----------|
-| [`main`](../../tree/main) | 通用基底 | 共用 | `xcloudvlmui-platform` | — |
-| [`bot-dgx-spark`](../../tree/bot-dgx-spark) | NVIDIA DGX Spark | ARM64 | `xcloudvlmui-dgx-spark` | `:8780` |
-| [`bot-mic743`](../../tree/bot-mic743) | Advantech MIC-743-AT | ARM64 | `xcloudvlmui-mic743` | `:8780` |
-| [`bot-air030`](../../tree/bot-air030) | air030 | ARM64 | `xcloudvlmui-air030` | `:8780` |
-| [`bot-x86`](../../tree/bot-x86) | x86-64 Linux | AMD64 | `xcloudvlmui-x86` | `:8680` |
-| [`bot-mac`](../../tree/bot-mac) | Apple Silicon Mac | ARM64 | `xcloudvlmui-mac` | `:8880` |
+| Branch | 硬體 | Project Name | 前綴 | 架構 | Port 入口 |
+|--------|------|-------------|------|------|-----------|
+| [`main`](../../tree/main) | 通用基底 | `xcloudvlmui-platform` | 無 | 共用 | — |
+| [`bot-dgx-spark`](../../tree/bot-dgx-spark) | NVIDIA DGX Spark | `xcloudvlmui-dgx-spark` | `dgx-spark-` | ARM64 | `:8780` |
+| [`bot-mic743`](../../tree/bot-mic743) | Advantech MIC-743 | `xcloudvlmui-mic743` | `mic743-` | ARM64 | `:8780` |
+| [`bot-air030`](../../tree/bot-air030) | Advantech AIR-030 | `xcloudvlmui-air030` | `air030-` | ARM64 | `:8780` |
+| [`bot-x86`](../../tree/bot-x86) | x86-64 Linux | `xcloudvlmui-x86` | `x86-` | AMD64 | `:8680` |
+| [`bot-mac`](../../tree/bot-mac) | Apple Silicon Mac | `xcloudvlmui-mac` | `mac-` | ARM64 | `:8880` |
 
 > **部署規則**：每台設備 checkout 對應 branch，互不干涉。  
 > `xCloudVLMui-dgx` 為獨立 repo，供正式 DGX Spark 生產環境使用。
@@ -86,7 +86,7 @@ cd xCloudVLMui
 git checkout bot-mac        # Apple Silicon Mac
 # git checkout bot-x86      # x86-64 Linux
 # git checkout bot-mic743   # Advantech MIC-743
-# git checkout bot-air030   # air030
+# git checkout bot-air030   # Advantech AIR-030
 # git checkout bot-dgx-spark # NVIDIA DGX Spark
 
 # 2. 設定環境變數
