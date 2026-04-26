@@ -31,7 +31,7 @@
 | [`xCloudVLMui-mic743`](https://github.com/guessleej/xCloudVLMui-mic743) | Advantech MIC-743 | `xcloudvlmui-mic743` | `mic743-` | ARM64 | `:8780` |
 | [`xCloudVLMui-air030`](https://github.com/guessleej/xCloudVLMui-air030) | Advantech AIR-030 | `xcloudvlmui-air030` | `air030-` | ARM64 | `:8780` |
 | [`xCloudVLMui-x86`](https://github.com/guessleej/xCloudVLMui-x86) | x86-64 Linux | `xcloudvlmui-x86` | `x86-` | AMD64 | `:8680` |
-| [`xCloudVLMui-mac`](https://github.com/guessleej/xCloudVLMui-mac) | Apple Silicon Mac | `xcloudvlmui-mac` | `mac-` | ARM64 | `:8880` |
+| [`xCloudVLMui-macOS`](https://github.com/guessleej/xCloudVLMui-macOS) | Apple Silicon Mac | `xcloudvlmui-mac` | `mac-` | ARM64 | `:8880` |
 
 ---
 
@@ -96,7 +96,7 @@ git clone https://github.com/guessleej/xCloudVLMui-air030.git
 git clone https://github.com/guessleej/xCloudVLMui-x86.git
 
 # Apple Silicon Mac
-git clone https://github.com/guessleej/xCloudVLMui-mac.git
+git clone https://github.com/guessleej/xCloudVLMui-macOS.git
 
 # ── 啟動流程（各 repo 相同）──────────────────────────────────────
 cd xCloudVLMui-<設備名稱>
